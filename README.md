@@ -11,9 +11,14 @@
 
 | Team Member | Services / Components Owned                            |
 | ----------- | ------------------------------------------------------ |
-| [Name]      | [e.g. `order-service/`, `order-service/db/schema.sql`] |
-| [Name]      | [e.g. `restaurant-service/`, `redis/menu-cache`]       |
-| [Name]      | [e.g. `dispatch-worker/`, `k6/`]                       |
+|  Anne-Colombe Sinkpon      | [`upload-service/`, `thumbnail-worker`]  |
+|  Duyen Tran      | [`catalog-service`]       |
+|  Zoë Akpan      | [`upload-service`, `thumbnail-worker`(can help out)]                       |
+|  Jihyun Kim      | [`search-index-worker`]                       |
+|   Nishil Adina      | [`quota-service`]                       |
+|   Gabriella Wang      | [`quota-service`]                       |
+|   Jahnavi Sharma      | [`catalog-service`, `transcode-worker`]                       |
+
 
 > Ownership is verified by `git log --author`. Each person must have meaningful commits in the directories they claim.
 
