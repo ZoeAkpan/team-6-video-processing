@@ -1,9 +1,9 @@
-# [Team Name] — [System Name]
+# Team 6 - Video Processing Pipeline 
 
 **Course:** COMPSCI 426  
-**Team:** [Name], [Name], [Name], ...  
-**System:** [e.g. Event Ticketing / Food Delivery / Video Platform / ...]  
-**Repository:** [GitHub URL — public fork of https://github.com/umass-cs-426/starter-project]
+**Team:** Anne-Colombe Sinkpon, Duyen Tran, Zoë Akpan, Jihyun Kim, Nishil Adina, Gabriella Wang, Jahnavi Sharma
+**System:** Video Processing Pipeline
+**Repository:** [GitHub URL — public fork of https://github.com/umass-cs-426/starter-project] --> Group repo = https://github.com/ZoeAkpan/team-6-video-processing
 
 ---
 
