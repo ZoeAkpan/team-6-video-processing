@@ -14,9 +14,9 @@
 |  Anne-Colombe Sinkpon      | [`upload-service/`, `thumbnail-worker`]  |
 |  Duyen Tran      | [`catalog-service`]       |
 |  Zoë Akpan      | [`upload-service`, `thumbnail-worker`(can help out)]                       |
-|  Jihyun Kim      | [`search-index-worker`]                       |
+|  Jihyun Kim      | [`quota-service`]                       |
 |   Nishil Adina      | [`quota-service`]                       |
-|   Gabriella Wang      | [`quota-service`]                       |
+|   Gabriella Wang      | [`search-index-worker`]                       |
 |   Jahnavi Sharma      | [`catalog-service`, `transcode-worker`]                       |
 
 
