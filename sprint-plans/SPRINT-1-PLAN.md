@@ -25,7 +25,7 @@ Our goal is to get the very basic structure of the project finished, which inclu
 
 | Team Member | Files / Directories Owned This Sprint           |
 | ----------- | ----------------------------------------------- |
-| [Ann-Colombe Sinkpon]      | `upload/`, `upload/db/schema.sql` |
+| [Anne-Colombe Sinkpon]      | `upload/`, `upload/db/schema.sql` |
 | [Jahnavi Sharma]      | `[catalog-service]/`, `catalog-service/Dockerfile`, `catalog-service/index.js`, `catalog-service/package.json`|
 | [Nishil Adina]      | `quota/`               |
 | [Zoë Akpan]     | `upload/`, `upload/db/schema.sql`, `README.md`               |
