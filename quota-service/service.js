@@ -34,7 +34,7 @@ await redis.connect()
 
 const startTime = Date.now()
 
-app.get('/health', async (req, res) => {
+app.get('/health', async (_req, res) => {
     const checks = {}
     let healthy = true
 
