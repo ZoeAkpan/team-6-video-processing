@@ -15,10 +15,11 @@
 |  Duyen Tran           | [`catalog-service`]                           |
 |  Zoë Akpan            | [`upload-service`, `thumbnail-worker`(can help out)]|
 |  Jihyun Kim           | [`quota-service`]                             |
-|  Nishil Adina         | [`quota-service`]                             |
+|  Nishil Adina         | [`quota-service`, `playback-service`]         |
 |  Gabriella Wang       | [`search-index-worker`]                       |
 |  Jahnavi Sharma       | [`catalog-service` ]                          |
-|  Robert Winfield      | [`transcode-worker`]                          |
+|  Robert Winfield      | [`transcode-worker`, `moderation-worker`]     |
+|  Sebastian Vaskes Pimentel | [`playback-service`, `moderation-worker`]|
 
 
 > Ownership is verified by `git log --author`. Each person must have meaningful commits in the directories they claim.
