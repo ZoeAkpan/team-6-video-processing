@@ -39,3 +39,7 @@ CREATE TABLE IF NOT EXISTS upload (
         OR processing_started_at IS NOT NULL
     )
 );
+
+CREATE INDEX IF NOT EXISTS idx_uploads_status ON upload (status);
+CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON upload (created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_uploads_uploaded_by ON upload (uploaded_by);
