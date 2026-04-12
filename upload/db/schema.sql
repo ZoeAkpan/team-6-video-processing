@@ -43,3 +43,9 @@ CREATE TABLE IF NOT EXISTS upload (
 CREATE INDEX IF NOT EXISTS idx_uploads_status ON upload (status);
 CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON upload (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_uploads_uploaded_by ON upload (uploaded_by);
+
+DROP TRIGGER IF EXISTS uploads_set_updated_at ON upload;
+CREATE TRIGGER uploads_set_updated_at
+BEFORE UPDATE ON upload
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
