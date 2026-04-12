@@ -5,6 +5,7 @@ import pg from 'pg'
 import { createClient } from 'redis'
 
 const app = express()
+const port = Number(process.env.PORT ?? 3001)
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 const redis = createClient({ url: process.env.REDIS_URL })
 await redis.connect()
@@ -45,4 +46,8 @@ app.get('/health', async (req, res) => {
   }
 
   res.status(healthy ? 200 : 503).json(body)
+})
+
+app.listen(port, () => {
+  console.log(`upload-service listening on port ${port}`)
 })
