@@ -19,3 +19,23 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+
+CREATE TABLE IF NOT EXISTS upload (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    original_filename TEXT NOT NULL,
+    storage_key TEXT NOT NULL UNIQUE,
+    content_type TEXT NOT NULL,
+    file_size_bytes BIGINT NOT NULL CHECK (file_size_bytes >= 0),
+    uploaded_by TEXT NOT NULL,
+    status upload_status NOT NULL DEFAULT 'pending',
+    error_message TEXT,
+    metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    processing_started_at TIMESTAMPTZ,
+    processing_completed_at TIMESTAMPTZ,
+    CHECK (
+        processing_completed_at IS NULL
+        OR processing_started_at IS NOT NULL
+    )
+);
