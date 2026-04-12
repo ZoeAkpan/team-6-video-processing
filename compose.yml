@@ -111,8 +111,30 @@ services:
   #     timeout: 3s
   #     retries: 5
 
+  upload-db:
+    image: postgres:16
+    container_name: upload-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: upload_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - upload-db-data:/var/lib/postgresql/data
+      - ./upload/db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - ./upload/db/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d upload_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 # ── Named volumes ──────────────────────────────────────────────────────────────
 # Declare a volume for each database here, e.g.:
 #
-# volumes:
-#   postgres-data:
+volumes:
+  upload-db-data:
