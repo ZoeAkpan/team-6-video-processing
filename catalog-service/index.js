@@ -18,10 +18,14 @@ app.get("/health", async (req, res) => {
 });
 
 app.get("/videos", async (req, res) => {
-  res.json([
-    { id: 1, title: "Sample Video 1", owner_id: "user1", status: "pending" },
-    { id: 2, title: "Sample Video 2", owner_id: "user2", status: "ready" },
-  ]);
+  try {
+    const result = await pool.query(
+      `SELECT * FROM video WHERE status = 'available' ORDER BY created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
