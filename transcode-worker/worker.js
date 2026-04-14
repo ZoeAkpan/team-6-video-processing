@@ -56,6 +56,7 @@ async function processJob(job) {
     });
 
     await client.publish('transcode-updates', JSON.stringify({
+        // TODO: adjust field names when job schema is finalized
         jobId: job.jobId,
         videoId: job.videoId,
         status: 'done',
