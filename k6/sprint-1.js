@@ -17,7 +17,7 @@ const errorRate = new Rate("errors");
 // ── Configuration ─────────────────────────────────────────────────────────────
 // Update this URL to point to your main read endpoint.
 // From inside the holmes container, use the service name (not localhost).
-const TARGET_URL = "http://catalog-service:3000/videos";
+const TARGET_URL = "http://catalog-service:3002/videos";
 
 export const options = {
   stages: [
@@ -33,7 +33,7 @@ export const options = {
 };
 
 export default function () {
-  const res = http.get(targetUrl, {
+  const res = http.get(TARGET_URL, {
     tags: { endpoint: "videos-read" },
   });
 
