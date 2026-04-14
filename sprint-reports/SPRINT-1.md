@@ -50,16 +50,74 @@ Script: `k6/sprint-1.js`
 Run: `docker compose exec holmes k6 run /workspace/k6/sprint-1.js`
 
 ```
-[Paste the k6 summary output here]
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: /workspace/k6/sprint-1.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 20 max VUs, 1m40s max duration (incl. graceful stop):
+              * default: Up to 20 looping VUs for 1m10s over 3 stages (gracefulRampDown: 30s, gracefulStop: 30s)
+
+
+
+  █ THRESHOLDS 
+
+    errors
+    ✓ 'rate<0.01' rate=0.00%
+
+    http_req_duration
+    ✓ 'p(95)<500' p(95)=6.15ms
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 4000    55.42556/s
+    checks_succeeded...: 100.00% 4000 out of 4000
+    checks_failed......: 0.00%   0 out of 4000
+
+    ✓ status is 200
+    ✓ response time < 500ms
+
+    CUSTOM
+    errors.........................: 0.00%  0 out of 2000
+
+    HTTP
+    http_req_duration..............: avg=3.85ms  min=1.11ms  med=3.54ms   max=56.07ms p(90)=5.41ms   p(95)=6.15ms  
+      { expected_response:true }...: avg=3.85ms  min=1.11ms  med=3.54ms   max=56.07ms p(90)=5.41ms   p(95)=6.15ms  
+    http_req_failed................: 0.00%  0 out of 2000
+    http_reqs......................: 2000   27.71278/s
+
+    EXECUTION
+    iteration_duration.............: avg=504.8ms min=501.4ms med=504.51ms max=556.4ms p(90)=506.51ms p(95)=507.37ms
+    iterations.....................: 2000   27.71278/s
+    vus............................: 1      min=1         max=20
+    vus_max........................: 20     min=20        max=20
+
+    NETWORK
+    data_received..................: 470 kB 6.5 kB/s
+    data_sent......................: 164 kB 2.3 kB/s
+
+
+
+
+running (1m12.2s), 00/20 VUs, 2000 complete and 0 interrupted iterations
+default ✓ [======================================] 00/20 VUs  1m10s
 ```
 
 | Metric             | Value |
 | ------------------ | ----- |
 | p50 response time  |       |
-| p95 response time  |       |
+| p95 response time  | 6.15ms|
 | p99 response time  |       |
-| Requests/sec (avg) |       |
-| Error rate         |       |
+| Requests/sec (avg) | 27.7  |
+| Error rate         | 0     |
 
 These numbers are your baseline. Sprint 2 caching should improve them measurably.
 
