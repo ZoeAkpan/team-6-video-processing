@@ -46,11 +46,13 @@ docker compose exec holmes bash
 ```
 
 ### Base URLs (development)
-
-```
 [your-service-name]    http://localhost:[port]
 [your-service-name]    http://localhost:[port]
 [worker-name]          http://localhost:[port]   (health endpoint only)
+```
+catalog-service        http://localhost:3000
+upload-service         http://localhost:3001
+quota-service          http://localhost:3004
 holmes                 (no port — access via exec)
 ```
 
@@ -63,8 +65,7 @@ holmes                 (no port — access via exec)
 
 ## System Overview
 
-[One paragraph describing what your system does and how the services interact.
-Include which service calls which, what queues exist, and how data flows.]
+This project is a video processing pipeline made up of small services connected through Docker Compose. In Sprint 1, the main flow we have working is that a user sends an upload request to `upload-service`, and `upload-service` makes a synchronous HTTP call to `quota-service` to make sure the user is still within their upload limits. If the quota check passes, the upload record is saved in the upload database. We also have `catalog-service`, which reads video records from its own database and exposes a read endpoint for the current catalog. Redis is also running in the system and is used by services for health checks and quota-related state.
 
 ---
 
@@ -77,24 +78,183 @@ Include which service calls which, what queues exist, and how data flows.]
 
 ---
 
-### [Service Name]
+### catalog-service
 
 ### GET /health
 
 ```
 GET /health
 
-  Returns the health status of this service and its dependencies.
+  Returns the health status of the catalog service and its database.
 
   Responses:
-    200  Service and all dependencies healthy
+    200  Service healthy
+    503  Database unreachable
+```
+
+**Example request:**
+
+```bash
+curl http://localhost:3000/health
+```
+
+**Example response (200):**
+
+```json
+{
+  "status": "healthy",
+  "db": "ok"
+}
+```
+
+**Example response (503):**
+
+```json
+{
+  "status": "unhealthy",
+  "db": "error: connection refused"
+}
+```
+
+---
+
+### GET /videos
+
+```
+GET /videos
+
+  Returns video records with status = available ordered by newest first.
+
+  Responses:
+    200  JSON array of videos
+    500  Database query error
+```
+
+**Example request:**
+
+```bash
+curl http://localhost:3000/videos
+```
+
+**Example response (200):**
+
+```json
+[
+  {
+    "id": "video-id",
+    "upload_id": "upload-id",
+    "user_id": "user-123",
+    "title": "Demo Video",
+    "original_filename": "demo.mp4",
+    "duration_seconds": 42,
+    "status": "available"
+  }
+]
+```
+
+---
+
+### upload-service
+
+### GET /health
+
+```
+GET /health
+
+  Returns the health status of the upload service, PostgreSQL, and Redis.
+
+  Responses:
+    200  Service and dependencies healthy
     503  One or more dependencies unreachable
 ```
 
 **Example request:**
 
 ```bash
-curl http://localhost:[port]/health
+curl http://localhost:3001/health
+```
+
+**Example response (200):**
+
+```json
+{
+  "status": "healthy",
+  "service": "upload-service",
+  "checks": {
+    "database": { "status": "healthy" },
+    "redis": { "status": "healthy" }
+  }
+}
+```
+
+---
+
+### POST /upload
+
+```
+POST /upload
+
+  Sends an upload request to the upload service. The service first makes a
+  synchronous HTTP call to quota-service at POST /quota/check. If the quota
+  check passes, the upload record is inserted into the upload database.
+
+  Responses:
+    201  Upload accepted and saved
+    400  Missing or invalid request body fields
+    403  Upload blocked by quota service
+    500  Internal error
+```
+
+**Example request:**
+
+```bash
+curl -X POST http://localhost:3001/upload \
+  -H "Content-Type: application/json" \
+  -d '{
+    "originalFilename": "demo.mp4",
+    "contentType": "video/mp4",
+    "fileSizeBytes": 1000000,
+    "uploadedBy": "user-123",
+    "metadata": { "title": "Demo" }
+  }'
+```
+
+**Example response (201):**
+
+```json
+{
+  "message": "Upload accepted",
+  "upload": {
+    "original_filename": "demo.mp4",
+    "status": "pending"
+  },
+  "quota": {
+    "allowed": true,
+    "reason": "ok"
+  }
+}
+```
+
+---
+
+### quota-service
+
+### GET /health
+
+```
+GET /health
+
+  Returns the health status of the quota service, PostgreSQL, and Redis.
+
+  Responses:
+    200  Service and dependencies healthy
+    503  One or more dependencies unreachable
+```
+
+**Example request:**
+
+```bash
+curl http://localhost:3004/health
 ```
 
 **Example response (200):**
@@ -107,19 +267,103 @@ curl http://localhost:[port]/health
 }
 ```
 
-**Example response (503):**
+---
+
+### Quota Service
+
+GET /health
+
+```
+GET /health
+
+  Returns the health status of this service and its dependencies.
+
+  Responses:
+    200  Service and all dependencies healthy
+    503  One or more dependencies unreachable
+```
+
+Example request:
+
+```bash
+curl http://localhost:3004/health
+```
+
+### Playback Service
+
+GET /health
+
+This service provides video playback-related APIs. If not running in compose, the health endpoint may be unreachable during local demos.
+
+Example request:
+
+```bash
+curl http://localhost:3000/health
+```
+
+### Moderation Worker
+
+GET /health
+
+```
+GET /health
+
+  Returns the health status of this worker and its dependencies.
+
+  Responses:
+    200  Service and all dependencies healthy
+    503  One or more dependencies unreachable
+```
+
+Example request:
+
+```bash
+curl http://localhost:3006/health
+```
+
+
+<!-- Add the rest of your endpoints below. One ### section per endpoint. -->
+### POST /quota/check
+
+```
+POST /quota/check
+
+  Checks whether a user is still allowed to upload a file based on upload count
+  and storage limits.
+
+  Responses:
+    200  Quota check completed
+    400  Missing or invalid request body fields
+    500  Internal error
+```
+
+**Example request:**
+
+```bash
+curl -X POST http://localhost:3004/quota/check \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-123",
+    "fileSizeBytes": 1000000
+  }'
+```
+
+**Example response (200):**
 
 ```json
 {
-  "status": "unhealthy",
-  "db": "ok",
-  "redis": "error: connection refused"
+  "allowed": true,
+  "reason": "ok",
+  "userId": "user-123",
+  "requestedFileSizeBytes": 1000000,
+  "uploadCount": 0,
+  "uploadLimitCount": 10,
+  "remainingUploadSlots": 10,
+  "storageUsedBytes": 0,
+  "storageLimitBytes": 1073741824,
+  "remainingBytes": 1073741824
 }
 ```
-
----
-
-<!-- Add the rest of your endpoints below. One ### section per endpoint. -->
 
 ---
 
