@@ -269,6 +269,60 @@ curl http://localhost:3004/health
 
 ---
 
+### Quota Service
+
+GET /health
+
+```
+GET /health
+
+  Returns the health status of this service and its dependencies.
+
+  Responses:
+    200  Service and all dependencies healthy
+    503  One or more dependencies unreachable
+```
+
+Example request:
+
+```bash
+curl http://localhost:3004/health
+```
+
+### Playback Service
+
+GET /health
+
+This service provides video playback-related APIs. If not running in compose, the health endpoint may be unreachable during local demos.
+
+Example request:
+
+```bash
+curl http://localhost:3000/health
+```
+
+### Moderation Worker
+
+GET /health
+
+```
+GET /health
+
+  Returns the health status of this worker and its dependencies.
+
+  Responses:
+    200  Service and all dependencies healthy
+    503  One or more dependencies unreachable
+```
+
+Example request:
+
+```bash
+curl http://localhost:3006/health
+```
+
+
+<!-- Add the rest of your endpoints below. One ### section per endpoint. -->
 ### POST /quota/check
 
 ```

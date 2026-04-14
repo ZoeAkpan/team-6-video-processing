@@ -111,6 +111,30 @@ services:
   #     timeout: 3s
   #     retries: 5
 
+  moderation-db:
+    image: postgres:16
+    container_name: moderation-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: moderation
+      POSTGRES_PASSWORD: moderation
+      POSTGRES_DB: moderation
+    volumes:
+      - moderation-db-data:/var/lib/postgresql/data
+      - ./moderation-worker/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moderation -d moderation"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  moderation-worker:
+    build: ./moderation-worker
+    container_name: moderation-worker
+    restart: unless-stopped
+    ports:
+      - "3006:3001"
   playback-db:
     image: postgres:16
     container_name: playback-db
@@ -139,6 +163,13 @@ services:
       - team-net
     environment:
       PORT: 3001
+      DATABASE_URL: postgres://moderation:moderation@moderation-db:5432/moderation
+      REDIS_URL: redis://redis:6379
+      TRANSCODE_COMPLETE_CHANNEL: transcode.complete
+      VIDEO_REJECTED_CHANNEL: video.rejected
+      MODERATION_PASS_RATE: 0.8
+    depends_on:
+      moderation-db:
       DATABASE_URL: postgres://playback:playback@playback-db:5432/playback
       REDIS_URL: redis://redis:6379
       VIEW_EVENT_CHANNEL: view.started
@@ -324,7 +355,8 @@ services:
 #   postgres-data:
 
 volumes:
+  catalog-db-data:
+  quota-db-data:
+  moderation-db-data:
   playback-db-data:
   upload-db-data:
-  catalog-db-data:
-
