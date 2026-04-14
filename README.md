@@ -46,15 +46,16 @@ docker compose exec holmes bash
 ```
 
 ### Base URLs (development)
-[your-service-name]    http://localhost:[port]
-[your-service-name]    http://localhost:[port]
-[worker-name]          http://localhost:[port]   (health endpoint only)
-```
-catalog-service        http://localhost:3000
-upload-service         http://localhost:3001
-quota-service          http://localhost:3004
-holmes                 (no port — access via exec)
-```
+`upload-service`        http://localhost:3000
+`quota-service`         http://localhost:3001
+`catalog-service`       http://localhost:3002
+`playback-service`      http://localhost:3003
+`transcode-worker`      http://localhost:3004
+`thumbnail-worker`      http://localhost:3005
+`search-index-worker`   http://localhost:3006
+`moderation-worker`     http://localhost:3007
+`holmes`                (no port — access via exec)
+
 
 > From inside holmes, services are reachable by name:
 > `curl http://your-service:3000/health`
