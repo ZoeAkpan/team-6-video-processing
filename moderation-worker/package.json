@@ -1,0 +1,15 @@
+{
+  "name": "moderation-worker",
+  "version": "1.0.0",
+  "description": "Moderation Worker",
+  "type": "module",
+  "main": "service.js",
+  "scripts": {
+    "start": "node service.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "pg": "^8.13.1",
+    "redis": "^5.8.2"
+  }
+}
