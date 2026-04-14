@@ -6,11 +6,32 @@ import { createClient } from 'redis'
 
 const app = express()
 const port = Number(process.env.PORT ?? 3001)
+const quotaServiceUrl = process.env.QUOTA_SERVICE_URL ?? 'http://quota-service:3002'
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 const redis = createClient({ url: process.env.REDIS_URL })
 await redis.connect()
 
 const startTime = Date.now()
+app.use(express.json())
+
+async function checkQuota(userId, fileSizeBytes) {
+  const response = await fetch(`${quotaServiceUrl}/quota/check`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, fileSizeBytes }),
+  })
+
+  const payload = await response.json()
+
+  if (!response.ok) {
+    const error = new Error(payload.error ?? 'quota check failed')
+    error.status = response.status
+    throw error
+  }
+
+  return payload
+}
+
 
 app.get('/health', async (req, res) => {
   const checks = {}
