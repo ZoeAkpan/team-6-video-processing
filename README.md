@@ -288,7 +288,7 @@ curl -X POST http://localhost:3001/quota/check \
   -H "Content-Type: application/json" \
   -d '{
     "userId": "user-123",
-    "fileSizeBytes": 1000000,
+    "fileSizeBytes": 1000000
   }'
 ```
 
