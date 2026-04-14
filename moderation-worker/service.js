@@ -6,7 +6,7 @@ const { Pool } = pg
 
 const app = express()
 
-const PORT = Number(process.env.PORT || 3001)
+const PORT = Number(process.env.PORT || 3007)
 const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
 const TRANSCODE_COMPLETE_CHANNEL =

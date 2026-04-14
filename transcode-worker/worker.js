@@ -2,7 +2,7 @@ import redis from 'redis'
 
 const redisUrl = process.env.REDIS_URL || 'redis://redis:6379'
 const queueName = 'transcode-jobs'
-const PORT = Number(process.env.PORT || 3002)
+const PORT = Number(process.env.PORT || 3004)
 
 const client = redis.createClient({ url: redisUrl })
 
