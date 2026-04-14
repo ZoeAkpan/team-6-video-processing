@@ -32,22 +32,6 @@ async function checkQuota(userId, fileSizeBytes) {
   return payload
 }
 
-async function consumeQuota(userId, fileSizeBytes) {
-  const response = await fetch(`${quotaServiceUrl}/quota/consume`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, fileSizeBytes }),
-  })
-
-  if (!response.ok) {
-    const payload = await response.json()
-    const error = new Error(payload.error ?? 'quota consumption failed')
-    error.status = response.status
-    throw error
-  }
-}
-
-
 app.get('/health', async (req, res) => {
   const checks = {}
   let healthy = true
@@ -62,7 +46,29 @@ app.get('/health', async (req, res) => {
     healthy = false
   }
 
-  app.post('/upload', async (req, res) => {
+  // Check Redis
+  const redisStart = Date.now()
+  try {
+    const pong = await redis.ping()
+    if (pong !== 'PONG') throw new Error(`unexpected response: ${pong}`)
+    checks.redis = { status: 'healthy', latency_ms: Date.now() - redisStart }
+  } catch (err) {
+    checks.redis = { status: 'unhealthy', error: err.message }
+    healthy = false
+  }
+
+  const body = {
+    status: healthy ? 'healthy' : 'unhealthy',
+    service: process.env.SERVICE_NAME ?? 'unknown',
+    timestamp: new Date().toISOString(),
+    uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
+    checks,
+  }
+
+  res.status(healthy ? 200 : 503).json(body)
+})
+
+app.post('/upload', async (req, res) => {
   const {
     originalFilename,
     contentType,
@@ -111,8 +117,6 @@ app.get('/health', async (req, res) => {
       ]
     )
 
-    await consumeQuota(uploadedBy, fileSizeBytes)
-
     return res.status(201).json({
       message: 'Upload accepted',
       upload: rows[0],
@@ -123,28 +127,6 @@ app.get('/health', async (req, res) => {
       error: err.message ?? 'Upload failed',
     })
   }
-})
-
-  // Check Redis
-  const redisStart = Date.now()
-  try {
-    const pong = await redis.ping()
-    if (pong !== 'PONG') throw new Error(`unexpected response: ${pong}`)
-    checks.redis = { status: 'healthy', latency_ms: Date.now() - redisStart }
-  } catch (err) {
-    checks.redis = { status: 'unhealthy', error: err.message }
-    healthy = false
-  }
-
-  const body = {
-    status: healthy ? 'healthy' : 'unhealthy',
-    service: process.env.SERVICE_NAME ?? 'unknown',
-    timestamp: new Date().toISOString(),
-    uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
-    checks,
-  }
-
-  res.status(healthy ? 200 : 503).json(body)
 })
 
 app.listen(port, () => {
