@@ -111,8 +111,251 @@ services:
   #     timeout: 3s
   #     retries: 5
 
+  moderation-db:
+    image: postgres:16
+    container_name: moderation-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: moderation
+      POSTGRES_PASSWORD: moderation
+      POSTGRES_DB: moderation
+    volumes:
+      - moderation-db-data:/var/lib/postgresql/data
+      - ./moderation-worker/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U moderation -d moderation"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  moderation-worker:
+    build: ./moderation-worker
+    container_name: moderation-worker
+    restart: unless-stopped
+    ports:
+      - "3007:3007"
+  playback-db:
+    image: postgres:16
+    container_name: playback-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: playback
+      POSTGRES_PASSWORD: playback
+      POSTGRES_DB: playback
+    volumes:
+      - playback-db-data:/var/lib/postgresql/data
+      - ./playback-service/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U playback -d playback"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  playback-service:
+    build: ./playback-service
+    container_name: playback-service
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    networks:
+      - team-net
+    environment:
+      PORT: 3003
+      DATABASE_URL: postgres://moderation:moderation@moderation-db:5432/moderation
+      REDIS_URL: redis://redis:6379
+      TRANSCODE_COMPLETE_CHANNEL: transcode.complete
+      VIDEO_REJECTED_CHANNEL: video.rejected
+      MODERATION_PASS_RATE: 0.8
+      VIEW_EVENT_CHANNEL: view.started
+    depends_on:
+      playback-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3003/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+
+
+  redis:
+    image: redis:7
+    container_name: redis
+    restart: unless-stopped
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  quota-db:
+    image: postgres:16
+    container_name: quota-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: quota
+      POSTGRES_PASSWORD: quota
+      POSTGRES_DB: quota
+    volumes:
+      - quota-db-data:/var/lib/postgresql/data
+      - ./quota-service/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U quota -d quota"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  
+  quota-service:
+    build: ./quota-service
+    container_name: quota-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    networks:
+      - team-net
+    environment:
+      PORT: 3001
+      DATABASE_URL: postgres://quota:quota@quota-db:5432/quota
+      REDIS_URL: redis://redis:6379
+      DEFAULT_UPLOAD_LIMIT_COUNT: 10
+      DEFAULT_STORAGE_LIMIT_BYTES: 1073741824
+    depends_on:
+      quota-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  transcode-worker:
+    build: ./transcode-worker
+    container_name: transcode-worker
+    restart: unless-stopped
+    networks:
+      - team-net
+    ports:
+      - "3004:3004"
+    environment:
+      REDIS_URL: redis://redis:6379
+      PORT: 3004
+    depends_on:
+      redis:
+        condition: service_healthy
+  upload-db:
+    image: postgres:16
+    container_name: upload-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: upload_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - upload-db-data:/var/lib/postgresql/data
+      - ./upload-service/db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - ./upload-service/db/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d upload_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  upload-service:
+    build: ./upload-service
+    container_name: upload-service
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    networks:
+      - team-net
+    environment:
+      PORT: 3000
+      SERVICE_NAME: upload-service
+      DATABASE_URL: postgres://user:pass@upload-db:5432/upload_db
+      REDIS_URL: redis://redis:6379
+      QUOTA_SERVICE_URL: http://quota-service:3001
+    depends_on:
+      upload-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      quota-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  catalog-db:
+    image: postgres:16
+    container_name: catalog-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: catalog
+      POSTGRES_DB: catalog
+    volumes:
+      - catalog-db-data:/var/lib/postgresql/data
+      - ./catalog-service/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalog -d catalog"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  catalog-service:
+    build: ./catalog-service
+    container_name: catalog-service
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    networks:
+      - team-net
+    environment:
+      PORT: 3002
+      DATABASE_URL: postgres://catalog:catalog@catalog-db:5432/catalog
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 # ── Named volumes ──────────────────────────────────────────────────────────────
 # Declare a volume for each database here, e.g.:
 #
 # volumes:
 #   postgres-data:
+
+volumes:
+  catalog-db-data:
+  quota-db-data:
+  moderation-db-data:
+  playback-db-data:
+  upload-db-data:
