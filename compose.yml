@@ -123,48 +123,46 @@ services:
       timeout: 3s
       retries: 5
 
-  upload-db:
+  quota-db:
     image: postgres:16
-    container_name: upload-db
+    container_name: quota-db
     restart: unless-stopped
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: pass
-      POSTGRES_DB: upload_db
-    ports:
-      - "5433:5432"
+      POSTGRES_USER: quota
+      POSTGRES_PASSWORD: quota
+      POSTGRES_DB: quota
     volumes:
-      - upload-db-data:/var/lib/postgresql/data
-      - ./upload-service/db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
-      - ./upload-service/db/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+      - quota-db-data:/var/lib/postgresql/data
+      - ./quota-service/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
     networks:
       - team-net
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d upload_db"]
+      test: ["CMD-SHELL", "pg_isready -U quota -d quota"]
       interval: 5s
       timeout: 3s
       retries: 5
-
-  upload-service:
-    build: ./upload-service
-    container_name: upload-service
+  
+  quota-service:
+    build: ./quota-service
+    container_name: quota-service
     restart: unless-stopped
     ports:
-      - "3001:3001"
+      - "3004:3001"
     networks:
       - team-net
     environment:
       PORT: 3001
-      SERVICE_NAME: upload-service
-      DATABASE_URL: postgres://user:pass@upload-db:5432/upload_db
+      DATABASE_URL: postgres://quota:quota@quota-db:5432/quota
       REDIS_URL: redis://redis:6379
+      DEFAULT_UPLOAD_LIMIT_COUNT: 10
+      DEFAULT_STORAGE_LIMIT_BYTES: 1073741824
     depends_on:
-      upload-db:
+      quota-db:
         condition: service_healthy
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:3001/health"]
       interval: 10s
       timeout: 5s
       retries: 3
@@ -173,5 +171,8 @@ services:
 # ── Named volumes ──────────────────────────────────────────────────────────────
 # Declare a volume for each database here, e.g.:
 #
+# volumes:
+#   postgres-data:
+
 volumes:
-  upload-db-data:
+  quota-db-data:

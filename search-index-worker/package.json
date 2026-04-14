@@ -1,0 +1,13 @@
+{
+  "name": "search-index-worker",
+  "version": "1.0.0",
+  "description": "Search Index Worker",
+  "type": "module",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "dependencies": {
+    "redis": "^5.8.2"
+  }
+}
