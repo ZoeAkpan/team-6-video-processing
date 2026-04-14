@@ -135,6 +135,30 @@ services:
     restart: unless-stopped
     ports:
       - "3006:3001"
+  playback-db:
+    image: postgres:16
+    container_name: playback-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: playback
+      POSTGRES_PASSWORD: playback
+      POSTGRES_DB: playback
+    volumes:
+      - playback-db-data:/var/lib/postgresql/data
+      - ./playback-service/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U playback -d playback"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+  playback-service:
+    build: ./playback-service
+    container_name: playback-service
+    restart: unless-stopped
+    ports:
+      - "3005:3001"
     networks:
       - team-net
     environment:
@@ -146,6 +170,11 @@ services:
       MODERATION_PASS_RATE: 0.8
     depends_on:
       moderation-db:
+      DATABASE_URL: postgres://playback:playback@playback-db:5432/playback
+      REDIS_URL: redis://redis:6379
+      VIEW_EVENT_CHANNEL: view.started
+    depends_on:
+      playback-db:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -155,6 +184,8 @@ services:
       timeout: 5s
       retries: 3
       start_period: 15s
+
+
 
   redis:
     image: redis:7
@@ -213,6 +244,17 @@ services:
       retries: 3
       start_period: 15s
 
+  transcode-worker:
+    build: ./transcode-worker
+    container_name: transcode-worker
+    restart: unless-stopped
+    networks:
+      - team-net
+    environment:
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      redis:
+        condition: service_healthy
   upload-db:
     image: postgres:16
     container_name: upload-db
@@ -316,4 +358,5 @@ volumes:
   catalog-db-data:
   quota-db-data:
   moderation-db-data:
+  playback-db-data:
   upload-db-data:
