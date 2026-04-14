@@ -18,10 +18,15 @@ We have working endpoints for `GET /health` on the services, a working read endp
 
 | Team Member | What They Delivered                                     | Key Commits            |
 | ----------- | ------------------------------------------------------- | ---------------------- |
-| Anne-Colombe Sinkpon | Upload service setup, upload DB wiring, synchronous upload-to-quota call, Compose updates, and k6 baseline script | `8e03a68`, `c4c5913`, `6af1e93` |
-| [Name]      | [e.g. order-service with DB schema, health endpoint]    | [short SHA or PR link] |
-| [Name]      | [e.g. restaurant-service, synchronous call integration] |                        |
-| [Name]      | [e.g. compose.yml wiring, k6 baseline script]           |  
+| Anne-Colombe Sinkpon | Upload service setup, upload DB wiring, synchronous upload-to-quota call, Compose updates, and k6 baseline script | `8e03a68`, `a9892d1`, `a6f2d95`, `24d50a8` |
+| Zoë Akpan      | Upload service GET /health endpoint, Updated compose.yml, Implemented package.json, Implemented Dockerfile, Completed README file (organized tasks/roles), Collectively worked on Sprint 1 plan    |  https://github.com/ZoeAkpan/team-6-video-processing/pull/4 |
+| Jahnavi Sharma      | Set up catalog-service with Express + Postgres connection, implemented GET /health with DB check, implemented GET /videos returning video records ordered by newest first | `52e5be5` |
+| Nishil Adina | Began quota service with /health endpoint, organized port assignments for workers and services, investigated issues with health checks for other services.| `4aa1044`, `181b8bf`, `c12331d` |
+| Duyen Tran      |Updated compose.yml with catalog port, finished catalog-service db schema, updated index to align more with the new schema | `2ddf16f`, `3b14656`, `d58a09b` |
+| Gabriella Wang | Laid foundation to establish connection to a configurable Redis server, added error handling for Redis connection issues, Laid foundation for processing of video metadata | `39adcc1`, `5867613`, `d9bfdcf` |
+| Jihyun Kim | Quota service implementation, quota DB schema, `GET /health` with Postgres and Redis checks, synchronous `POST /quota/check` endpoint, and Docker Compose writing/documentation updates | `7db6768`, `6de1ce2`, `3ede0a0` |
+| Robert Winfield | Implemented foundational transcode-worker to run a Redis worker listening for incoming transcode jobs, wrote basic load test to simulate incoming jobs | `8bb12cd`, `c777e32`, `0bf3427` | 
+| Sebastian Vaskes Pimentel | Implemented the Postgres and Redis backed HTTP service which records views,returns resume position and ignores duplicate events. Secondly, Implemented the Postgres and Redis backed background worker that listens for transcode.complete, stores moderation results, records malformed events, and publishes rejections events. | `6491377`, `7cc555`, `ac56f96`, `853ca84`, `463f061`, `a5f38f3`, `c38be54`|
 
 Verify with:
 
@@ -34,7 +39,7 @@ git log --author="Name" --oneline -- path/to/directory/
 ## What Is Working
 
 - [ ] `docker compose up` starts all services without errors
-- [ ] `docker compose ps` shows every service as `(healthy)`
+- [ ] `docker compose ps` shows most services as `(healthy)`
 - [ ] `GET /health` on every service returns `200` with DB and Redis status
 - [ ] At least one synchronous service-to-service call works end-to-end
 - [ ] k6 baseline test runs successfully
@@ -45,7 +50,7 @@ We completed all of the items above during Sprint 1 testing.
 
 ## What Is Not Working / Cut
 
-Some of the worker-based parts are still incomplete. Sprint 1 was mostly about getting the base services, databases, health endpoints, and one synchronous call working first. We also spent more time than expected on merge conflicts and getting everyone’s Docker Compose changes to work together.
+Some of the worker-based parts are still incomplete. Sprint 1 was mostly about getting the base services, databases, health endpoints, and one synchronous call working first. We also spent more time than expected on merge conflicts and getting everyone’s Docker Compose changes to work together. There are also some lingering issues with catalog-service and upload-service appearing as “unhealthy” when we run `docker compose ps` despite the services running and their health endpoints working.
 
 ---
 
