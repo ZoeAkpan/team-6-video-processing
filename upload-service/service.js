@@ -32,6 +32,21 @@ async function checkQuota(userId, fileSizeBytes) {
   return payload
 }
 
+async function consumeQuota(userId, fileSizeBytes) {
+  const response = await fetch(`${quotaServiceUrl}/quota/consume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, fileSizeBytes }),
+  })
+
+  if (!response.ok) {
+    const payload = await response.json()
+    const error = new Error(payload.error ?? 'quota consumption failed')
+    error.status = response.status
+    throw error
+  }
+}
+
 
 app.get('/health', async (req, res) => {
   const checks = {}
