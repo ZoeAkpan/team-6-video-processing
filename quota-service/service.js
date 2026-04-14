@@ -1,4 +1,5 @@
 import express from 'express'
+import pg from 'pg'
 import { createClient } from 'redis'
 
 const { Pool } = pg
