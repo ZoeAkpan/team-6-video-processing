@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "description": "Quota Service",
   "type": "module",
-  "main": "server.js",
+  "main": "service.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node service.js"
   },
   "dependencies": {
     "express": "^5.2.1",
