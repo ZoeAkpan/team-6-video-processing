@@ -45,6 +45,29 @@ app.get('/health', async (_req, res) => {
 
   res.status(healthy ? 200 : 503).json(body)
 })
+app.post('/quota/check', async (req, res) => {
+  const { userId, fileSizeBytes } = req.body ?? {}
+
+  if (!userId || typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
+    return res.status(400).json({
+      error: 'userId and positive numeric fileSizeBytes are required',
+    })
+  }
+
+  const usedBytesRaw = await redis.get(`quota:${userId}:used_bytes`)
+  const usedBytes = Number(usedBytesRaw ?? 0)
+  const remainingBytes = Math.max(defaultQuotaBytes - usedBytes, 0)
+  const allowed = fileSizeBytes <= remainingBytes
+
+  return res.json({
+    userId,
+    allowed,
+    quotaBytes: defaultQuotaBytes,
+    usedBytes,
+    remainingBytes,
+  })
+})
+
 
 app.listen(port, () => {
   console.log(`quota-service listening on port ${port}`)
