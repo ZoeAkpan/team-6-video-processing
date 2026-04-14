@@ -168,6 +168,56 @@ services:
       retries: 3
       start_period: 15s
 
+  upload-db:
+    image: postgres:16
+    container_name: upload-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: upload_db
+    ports:
+      - "5433:5432"
+    volumes:
+      - upload-db-data:/var/lib/postgresql/data
+      - ./upload-service/db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
+      - ./upload-service/db/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d upload_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  upload-service:
+    build: ./upload-service
+    container_name: upload-service
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    networks:
+      - team-net
+    environment:
+      PORT: 3001
+      SERVICE_NAME: upload-service
+      DATABASE_URL: postgres://user:pass@upload-db:5432/upload_db
+      REDIS_URL: redis://redis:6379
+      QUOTA_SERVICE_URL: http://quota-service:3001
+    depends_on:
+      upload-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      quota-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 # ── Named volumes ──────────────────────────────────────────────────────────────
 # Declare a volume for each database here, e.g.:
 #
@@ -176,3 +226,4 @@ services:
 
 volumes:
   quota-db-data:
+  upload-db-data:
