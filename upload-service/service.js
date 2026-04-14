@@ -5,7 +5,7 @@ import pg from 'pg'
 import { createClient } from 'redis'
 
 const app = express()
-const port = Number(process.env.PORT ?? 3001)
+const port = Number(process.env.PORT ?? 3000)
 const quotaServiceUrl = process.env.QUOTA_SERVICE_URL ?? 'http://quota-service:3002'
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 const redis = createClient({ url: process.env.REDIS_URL })
