@@ -46,15 +46,17 @@ docker compose exec holmes bash
 ```
 
 ### Base URLs (development)
-`upload-service`        http://localhost:3000
-`quota-service`         http://localhost:3001
-`catalog-service`       http://localhost:3002
-`playback-service`      http://localhost:3003
-`transcode-worker`      http://localhost:3004
-`thumbnail-worker`      http://localhost:3005
-`search-index-worker`   http://localhost:3006
-`moderation-worker`     http://localhost:3007
-`holmes`                (no port — access via exec)
+| Service/Worker | Port |
+|-------------------------|-----------------------|
+| `upload-service`        | http://localhost:3000 |
+| `quota-service`         | http://localhost:3001 |
+| `catalog-service`       | http://localhost:3002 |
+| `playback-service`      | http://localhost:3003 |
+| `transcode-worker`      | http://localhost:3004 |
+| `thumbnail-worker`      | http://localhost:3005 |
+| `search-index-worker`   | http://localhost:3006 |
+| `moderation-worker`     | http://localhost:3007 |
+| `holmes`                | (no port — access via exec) |
 
 
 > From inside holmes, services are reachable by name:
@@ -77,9 +79,7 @@ This project is a video processing pipeline made up of small services connected 
   Follow the format described in the project documentation: compact code block notation, then an example curl and an example response. Add a level-2 heading per service, level-3 per endpoint.
 -->
 
----
-
-### catalog-service
+## catalog-service
 
 ### GET /health
 
@@ -96,7 +96,7 @@ GET /health
 **Example request:**
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3002/health
 ```
 
 **Example response (200):**
@@ -134,7 +134,7 @@ GET /videos
 **Example request:**
 
 ```bash
-curl http://localhost:3000/videos
+curl http://localhost:3002/videos
 ```
 
 **Example response (200):**
@@ -155,7 +155,7 @@ curl http://localhost:3000/videos
 
 ---
 
-### upload-service
+## upload-service
 
 ### GET /health
 
@@ -172,7 +172,7 @@ GET /health
 **Example request:**
 
 ```bash
-curl http://localhost:3001/health
+curl http://localhost:3000/health
 ```
 
 **Example response (200):**
@@ -209,7 +209,7 @@ POST /upload
 **Example request:**
 
 ```bash
-curl -X POST http://localhost:3001/upload \
+curl -X POST http://localhost:3000/upload \
   -H "Content-Type: application/json" \
   -d '{
     "originalFilename": "demo.mp4",
@@ -238,7 +238,7 @@ curl -X POST http://localhost:3001/upload \
 
 ---
 
-### quota-service
+## quota-service
 
 ### GET /health
 
@@ -255,7 +255,7 @@ GET /health
 **Example request:**
 
 ```bash
-curl http://localhost:3004/health
+curl http://localhost:3001/health
 ```
 
 **Example response (200):**
@@ -268,43 +268,21 @@ curl http://localhost:3004/health
 }
 ```
 
----
+## playback-service
 
-### Quota Service
-
-GET /health
-
-```
-GET /health
-
-  Returns the health status of this service and its dependencies.
-
-  Responses:
-    200  Service and all dependencies healthy
-    503  One or more dependencies unreachable
-```
-
-Example request:
-
-```bash
-curl http://localhost:3004/health
-```
-
-### Playback Service
-
-GET /health
+### GET /health
 
 This service provides video playback-related APIs. If not running in compose, the health endpoint may be unreachable during local demos.
 
 Example request:
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost:3003/health
 ```
 
-### Moderation Worker
+## moderation-worker
 
-GET /health
+### GET /health
 
 ```
 GET /health
@@ -319,7 +297,7 @@ GET /health
 Example request:
 
 ```bash
-curl http://localhost:3006/health
+curl http://localhost:3007/health
 ```
 
 
@@ -341,7 +319,7 @@ POST /quota/check
 **Example request:**
 
 ```bash
-curl -X POST http://localhost:3004/quota/check \
+curl -X POST http://localhost:3007/quota/check \
   -H "Content-Type: application/json" \
   -d '{
     "userId": "user-123",
