@@ -44,6 +44,7 @@ Our goal is to get the very basic structure of the project finished, which inclu
 | [Robert Winfield]     | `[transcode-worker]/`               |
 | [Duyen Tran]     | `[catalog-service]/`, `catalog-service/db/schema.sql`, `compose.yml` additions     |
 | [Gabriella Wang]     | `[search-index-worker]/’        |
+| [Jihyun Kim]     | `quota-service/`, `quota-service/db/schema.sql`, `compose.yml` additions |
 
 
 Each person must have meaningful commits in the paths they claim. Ownership is verified by:
@@ -172,6 +173,14 @@ git log --author="Name" --oneline -- path/to/directory/
 - [ ] Create catalog DB
 - [ ] Implement `Get /health]/` with Redis
 
+
+### [Jihyun Kim]
+
+
+- [ ] Create `quota-service/db/schema.sql`
+- [ ] Implement `GET /health` with Postgres and Redis checks
+- [ ] Implement `POST /quota/check` for synchronous validation from Upload Service
+- [ ] Add `quota-service` and `quota-db` to `compose.yml` with healthchecks and `depends_on`
 
 
 
