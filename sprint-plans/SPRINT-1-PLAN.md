@@ -54,7 +54,7 @@ git log --author="Name" --oneline -- path/to/directory/
 ## Tasks
 
 
-### [Anne-Colombe Sinkpon]
+### Anne-Colombe Sinkpon
 
 - [ ] Implement `GET /health` with DB check
 - [ ] Write `upload/db/schema.sql` and seed script
@@ -62,7 +62,7 @@ git log --author="Name" --oneline -- path/to/directory/
 - [ ] Add `healthcheck` directive to `compose.yml`
 
 
-### [Jahnavi Sharma]
+### Jahnavi Sharma
 
 - [ ] Set up `[service]/` with Express + Redis connection
 - [ ] Implement `GET /health` with Redis check
@@ -70,21 +70,21 @@ git log --author="Name" --oneline -- path/to/directory/
 - [ ] Test synchronous call to [other service]
 
 
-### [Nishil Adina]
+### Nishil Adina
 
 - [ ] Create `quota-service/` directory for quota service
 - [ ] Create quota DB
 - [ ] Run k6 load testing
 
 
-### [Gabriella Wang]
+### Gabriella Wang
 
 - [ ] Set up `search index worker`
 - [ ] Establish Redis pub/sub connection 
 - [ ] Implement a listener for `transcode complete event
 
 
-### [Zoë Akpan]
+### Zoë Akpan
 
 - [ ] Write `README.md` startup instructions and endpoint list
 - [ ] Collectively write `sprint-plans/SPRINT-1-PLAN.md`
@@ -92,27 +92,42 @@ git log --author="Name" --oneline -- path/to/directory/
 - [ ] Implement `GET /health` with Redis check
 
 
-### [Robert Winfield]
+### Robert Winfield
 
 - [ ] Set up `transcode-worker/` directory for Redis queue
 - [ ] Implement logic for consuming job from queue
 - [ ] Write Redis benchmark tests for load testing
 
 
-### [Duyen Tran]
+### Duyen Tran
 
 - [ ] Create `[catalog-service]/` with Redis
 - [ ] Create catalog DB
 - [ ] Implement `Get /health]/` with Redis
 
 
-### [Jihyun Kim]
+### Jihyun Kim
 
 - [ ] Create `quota-service/db/schema.sql`
 - [ ] Implement `GET /health` with Postgres and Redis checks
 - [ ] Implement `POST /quota/check` for synchronous validation from Upload Service
 - [ ] Add `quota-service` and `quota-db` to `compose.yml` with healthchecks and `depends_on`
 
+
+### Sebastian Vaskes Pimentel
+
+- [ ] Create `playback-service/` scaffold
+- [ ] Add playback database schema
+- [ ] Implement `GET /health` for playback-service
+- [ ] Implement `POST /views`
+- [ ] Implement `GET /resume`
+- [ ] Add duplicate suppression for repeated view events within 30 seconds
+- [ ] Create `moderation-worker/` scaffold
+- [ ] Add moderation database schema
+- [ ] Implement `GET /health` for moderation-worker
+- [ ] Subscribe to `transcode.complete`
+- [ ] Write moderation results to the moderation database
+- [ ] Handle malformed moderation events as poison pills
 
 
 ---
