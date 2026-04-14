@@ -90,6 +90,7 @@ async function handleTranscodeComplete(rawMessage) {
       `,
       [rawMessage, `invalid json: ${err.message}`]
     )
+    console.error('Inserted poison pill (invalid json)', { rawMessage })
     return
   }
 
@@ -104,6 +105,7 @@ async function handleTranscodeComplete(rawMessage) {
       `,
       [rawMessage, 'missing videoId']
     )
+    console.error('Inserted poison pill (missing videoId)', { rawMessage })
     return
   }
 
@@ -129,6 +131,8 @@ async function handleTranscodeComplete(rawMessage) {
     `,
     [videoId, status, reason, JSON.stringify(payload)]
   )
+
+  console.log('Moderation recorded', { videoId, status, reason })
 
   if (!approved) {
     await redis.publish(
