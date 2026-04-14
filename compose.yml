@@ -168,6 +168,48 @@ services:
       retries: 3
       start_period: 15s
 
+  catalog-db:
+    image: postgres:16
+    container_name: catalog-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: catalog
+      POSTGRES_PASSWORD: catalog
+      POSTGRES_DB: catalog
+    volumes:
+      - catalog-db-data:/var/lib/postgresql/data
+      - ./catalog-service/db/schema.sql:/docker-entrypoint-initdb.d/001-schema.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U catalog -d catalog"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  catalog-service:
+    build: ./catalog-service
+    container_name: catalog-service
+    restart: unless-stopped
+    ports:
+      - "3002:3000"
+    networks:
+      - team-net
+    environment:
+      PORT: 3000
+      DATABASE_URL: postgres://catalog:catalog@catalog-db:5432/catalog
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
 # ── Named volumes ──────────────────────────────────────────────────────────────
 # Declare a volume for each database here, e.g.:
 #
@@ -176,3 +218,5 @@ services:
 
 volumes:
   quota-db-data:
+  catalog-db-data:
+
