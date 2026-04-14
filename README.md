@@ -268,16 +268,67 @@ curl http://localhost:3001/health
 }
 ```
 
+### POST /quota/check
+
+```
+POST /quota/check
+
+  Sends information regarding an upload request (user id and file size) to the quota service. The quota service determines if this upload should be accepted or rejected based on the user's quota limits.
+
+  Responses:
+    200  Quota check completed
+    400  Missing or invalid request body fields
+    500  Internal error
+```
+
+**Example request:**
+
+```bash
+curl -X POST http://localhost:3001/quota/check \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-123",
+    "fileSizeBytes": 1000000,
+  }'
+```
+
+**Example response (200):**
+
+```json
+{
+  "allowed": true,
+  "reason": "ok",
+  "userId": "user-123",
+  "requestedFileSizeBytes": 1000000,
+  "uploadCount": 1,
+  "uploadLimitCount": 10,
+  "remainingUploadSlots": 9,
+  "storageUsedBytes": 1000000,
+  "storageLimitBytes": 1073741824,
+  "remainingBytes": 1072741824,
+}
+```
+
 ## playback-service
 
 ### GET /health
 
 This service provides video playback-related APIs. If not running in compose, the health endpoint may be unreachable during local demos.
 
-Example request:
+**Example request:**
 
 ```bash
 curl http://localhost:3003/health
+```
+
+**Example response (200):**
+
+```json
+{
+  "status": "healthy",
+  "db": "ok",
+  "redis": "ok"
+}
 ```
 
 ## moderation-worker
@@ -294,57 +345,21 @@ GET /health
     503  One or more dependencies unreachable
 ```
 
-Example request:
-
-```bash
-curl http://localhost:3007/health
-```
-
-
-<!-- Add the rest of your endpoints below. One ### section per endpoint. -->
-### POST /quota/check
-
-```
-POST /quota/check
-
-  Checks whether a user is still allowed to upload a file based on upload count
-  and storage limits.
-
-  Responses:
-    200  Quota check completed
-    400  Missing or invalid request body fields
-    500  Internal error
-```
-
 **Example request:**
 
 ```bash
-curl -X POST http://localhost:3007/quota/check \
-  -H "Content-Type: application/json" \
-  -d '{
-    "userId": "user-123",
-    "fileSizeBytes": 1000000
-  }'
+curl http://localhost:3007/health
 ```
 
 **Example response (200):**
 
 ```json
 {
-  "allowed": true,
-  "reason": "ok",
-  "userId": "user-123",
-  "requestedFileSizeBytes": 1000000,
-  "uploadCount": 0,
-  "uploadLimitCount": 10,
-  "remainingUploadSlots": 10,
-  "storageUsedBytes": 0,
-  "storageLimitBytes": 1073741824,
-  "remainingBytes": 1073741824
+  "status": "healthy",
+  "db": "ok",
+  "redis": "ok"
 }
 ```
-
----
 
 ## Sprint History
 

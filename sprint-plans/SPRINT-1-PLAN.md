@@ -34,6 +34,7 @@ Our goal is to get the very basic structure of the project finished, which inclu
 | [Duyen Tran]     | `[catalog-service]/`, `catalog-service/db/schema.sql`, `compose.yml` additions     |
 | [Gabriella Wang]     | `[search-index-worker]/’        |
 | [Jihyun Kim]     | `quota-service/`, `quota-service/db/schema.sql`, `compose.yml` additions |
+| [Sebastian Vaskes Pimentel] | `playback-service/`, `moderation-worker/`, related `compose.yml` additions |
 
 
 Each person must have meaningful commits in the paths they claim. Ownership is verified by:
