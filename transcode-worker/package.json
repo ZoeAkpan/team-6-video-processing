@@ -5,7 +5,8 @@
   "type": "module",
   "main": "worker.js",
   "scripts": {
-    "start": "node worker.js"
+    "start": "node worker.js",
+    "test:load": "node test/load-test.js"
   },
   "dependencies": {
     "redis": "^5.8.2"
