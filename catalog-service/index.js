@@ -51,5 +51,22 @@ app.get("/videos", async (req, res) => {
   }
 });
 
+app.get("/video/search", async (req,res) => {
+  try {
+    const {q} = req.query;
+    if(!q) {
+      return res.status(400).json({error:"missing search query"});
+    }
+
+    const result = await pool.query(
+      `SELECT * FROM video WHERE title ILIKE $1 AND status = 'available' ORDER BY created_at DESC`, [`%${q}%1`]
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message});
+  }
+})
+
 const PORT = process.env.PORT || 3002;
 app.listen(PORT, () => console.log(`catalog-service running on port ${PORT}`));
