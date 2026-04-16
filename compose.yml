@@ -135,6 +135,24 @@ services:
     restart: unless-stopped
     ports:
       - "3007:3007"
+    networks:
+      - team-net
+    environment:
+      PORT: 3007
+      DATABASE_URL: postgres://moderation:moderation@moderation-db:5432/moderation
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      moderation-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   playback-db:
     image: postgres:16
     container_name: playback-db
@@ -163,7 +181,7 @@ services:
       - team-net
     environment:
       PORT: 3003
-      DATABASE_URL: postgres://moderation:moderation@moderation-db:5432/moderation
+      DATABASE_URL: postgres://playback:playback@playback-db:5432/playback
       REDIS_URL: redis://redis:6379
       TRANSCODE_COMPLETE_CHANNEL: transcode.complete
       VIDEO_REJECTED_CHANNEL: video.rejected

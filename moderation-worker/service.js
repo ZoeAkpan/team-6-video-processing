@@ -23,17 +23,17 @@ const redis = createClient({
   url: REDIS_URL,
 })
 
-const subscriber = createClient({
-  url: REDIS_URL,
-})
+// const subscriber = createClient({
+//   url: REDIS_URL,
+// })
 
 redis.on('error', (err) => {
   console.error('Redis error:', err.message)
 })
 
-subscriber.on('error', (err) => {
-  console.error('Redis subscriber error:', err.message)
-})
+// subscriber.on('error', (err) => {
+//   console.error('Redis subscriber error:', err.message)
+// })
 
 async function getHealthSnapshot() {
   let db = 'ok'
@@ -47,7 +47,7 @@ async function getHealthSnapshot() {
 
   try {
     const pong = await redis.ping()
-    if (pong !== 'PONG') {
+    if (pong !== 'PONG' && pong !== "pong") {
       throw new Error(`unexpected ping response: ${pong}`)
     }
   } catch (err) {
@@ -150,13 +150,13 @@ async function handleTranscodeComplete(rawMessage) {
 async function shutdown(signal) {
   console.log(`Received ${signal}. Shutting down moderation-worker...`)
 
-  try {
-    if (subscriber.isOpen) {
-      await subscriber.quit()
-    }
-  } catch (err) {
-    console.error('Error while closing Redis subscriber:', err.message)
-  }
+  // try {
+  //   if (subscriber.isOpen) {
+  //     await subscriber.quit()
+  //   }
+  // } catch (err) {
+  //   console.error('Error while closing Redis subscriber:', err.message)
+  // }
 
   try {
     if (redis.isOpen) {
@@ -181,10 +181,10 @@ process.on('SIGTERM', () => shutdown('SIGTERM'))
 async function start() {
   try {
     await redis.connect()
-    await subscriber.connect()
+    // await subscriber.connect()
     await pool.query('SELECT 1')
 
-    await subscriber.subscribe(TRANSCODE_COMPLETE_CHANNEL, async (message) => {
+    await redis.subscribe(TRANSCODE_COMPLETE_CHANNEL, async (message) => {
       try {
         await handleTranscodeComplete(message)
       } catch (err) {
