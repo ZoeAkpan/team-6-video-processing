@@ -9,6 +9,7 @@ const app = express()
 const PORT = Number(process.env.PORT || 3005)
 const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
+const QUEUE_NAME = process.env.THUMBNAIL_QUEUE_NAME || 'thumbnail-jobs'
 const DEAD_LETTER_QUEUE_NAME =
   process.env.THUMBNAIL_DEAD_LETTER_QUEUE_NAME || 'thumbnail-dead-letter'
 const LAST_SUCCESS_KEY =
@@ -29,13 +30,15 @@ const PROCESSING_DELAY_MS = Number(process.env.THUMBNAIL_PROCESSING_DELAY_MS || 
 const CATALOG_CACHE_KEY = process.env.CATALOG_CACHE_KEY || 'catalog:videos:available'
 
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL,
+  connectionString: DATABASE_URL,
 })
 const redis = createClient({ url: REDIS_URL })
 const subscriber = createClient({ url: REDIS_URL })
+const workerRedis = createClient({ url: REDIS_URL })
 
 let lastSuccessfullyProcessedJobAt = null
 let inFlightJobId = null
+let shuttingDown = false
 
 redis.on('error', (err) => {
   console.error('Thumbnail worker Redis error:', err.message)
@@ -43,6 +46,10 @@ redis.on('error', (err) => {
 
 subscriber.on('error', (err) => {
   console.error('Thumbnail worker subscriber Redis error:', err.message)
+})
+
+workerRedis.on('error', (err) => {
+  console.error('Thumbnail worker queue Redis error:', err.message)
 })
 
 async function getLastSuccessfullyProcessedJobAt() {
