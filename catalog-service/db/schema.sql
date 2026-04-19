@@ -73,4 +73,8 @@ ALTER TABLE thumbnail
     ADD COLUMN IF NOT EXISTS thumbnail_url TEXT,
     ADD COLUMN IF NOT EXISTS timestamp_seconds INTEGER NOT NULL DEFAULT 0;
 
+UPDATE thumbnail
+SET thumbnail_url = '/thumbnails/' || video_id::text || '/0.jpg'
+WHERE thumbnail_url IS NULL;
+
 CREATE INDEX IF NOT EXISTS idx_thumbnail_video_id ON thumbnail (video_id);
