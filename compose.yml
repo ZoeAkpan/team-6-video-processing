@@ -285,6 +285,7 @@ services:
       REDIS_URL: redis://redis:6379
       DATABASE_URL: postgres://catalog:catalog@catalog-db:5432/catalog
       PORT: 3005
+      THUMBNAIL_QUEUE_NAME: thumbnail-jobs
       THUMBNAIL_DEAD_LETTER_QUEUE_NAME: thumbnail-dead-letter
       TRANSCODE_COMPLETE_CHANNELS: transcode-complete,transcode.complete
       THUMBNAIL_PROCESSING_DELAY_MS: 1000
