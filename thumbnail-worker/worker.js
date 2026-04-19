@@ -264,6 +264,17 @@ async function handleTranscodeComplete(raw) {
   }
 }
 
+async function processQueuedEvent(raw) {
+  try {
+    const event = parseTranscodeComplete(raw)
+    await processTranscodeComplete(event)
+  } catch (err) {
+    console.error('Thumbnail event failed:', err.message)
+    await moveToDeadLetter(raw, err.message)
+  } finally {
+    inFlightJobId = null
+  }
+}
 
 app.get('/health', async (_req, res) => {
   const snapshot = await getHealthSnapshot()
