@@ -274,14 +274,18 @@ process.on('SIGTERM', () => shutdown('SIGTERM'))
 async function start() {
   try {
     await redis.connect()
-    await workerRedis.connect()
+    await subscriber.connect()
+    await pool.query('SELECT 1')
     await getLastSuccessfullyProcessedJobAt()
+
+    await subscriber.subscribe(TRANSCODE_COMPLETE_CHANNELS, handleTranscodeComplete)
 
     app.listen(PORT, () => {
       console.log(`thumbnail-worker listening on port ${PORT}`)
+      console.log(
+        `thumbnail-worker subscribed to ${TRANSCODE_COMPLETE_CHANNELS.join(', ')}`
+      )
     })
-
-    await workerLoop()
   } catch (err) {
     console.error('Failed to start thumbnail-worker:', err)
     process.exit(1)
