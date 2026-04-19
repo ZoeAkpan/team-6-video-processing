@@ -18,6 +18,8 @@ const PROCESSING_DELAY_MS = Number(process.env.THUMBNAIL_PROCESSING_DELAY_MS || 
 const redis = createClient({ url: REDIS_URL })
 const workerRedis = createClient({ url: REDIS_URL })
 
+let lastSuccessfullyProcessedJobAt = null
+
 redis.on('error', (err) => {
   console.error('Thumbnail worker Redis error:', err.message)
 })
@@ -36,4 +38,13 @@ async function getQueueDepths() {
     queueDepth,
     deadLetterQueueDepth,
   }
+}
+
+async function getLastSuccessfullyProcessedJobAt() {
+  if (lastSuccessfullyProcessedJobAt) {
+    return lastSuccessfullyProcessedJobAt
+  }
+
+  lastSuccessfullyProcessedJobAt = await redis.get(LAST_SUCCESS_KEY)
+  return lastSuccessfullyProcessedJobAt
 }
