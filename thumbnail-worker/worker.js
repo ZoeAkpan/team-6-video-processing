@@ -17,3 +17,23 @@ const PROCESSING_DELAY_MS = Number(process.env.THUMBNAIL_PROCESSING_DELAY_MS || 
 
 const redis = createClient({ url: REDIS_URL })
 const workerRedis = createClient({ url: REDIS_URL })
+
+redis.on('error', (err) => {
+  console.error('Thumbnail worker Redis error:', err.message)
+})
+
+workerRedis.on('error', (err) => {
+  console.error('Thumbnail worker blocking Redis error:', err.message)
+})
+
+async function getQueueDepths() {
+  const [queueDepth, deadLetterQueueDepth] = await Promise.all([
+    redis.lLen(QUEUE_NAME),
+    redis.lLen(DEAD_LETTER_QUEUE_NAME),
+  ])
+
+  return {
+    queueDepth,
+    deadLetterQueueDepth,
+  }
+}
