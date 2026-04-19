@@ -310,6 +310,7 @@ app.use((_req, res) => {
 
 async function shutdown(signal) {
   console.log(`Received ${signal}. Shutting down thumbnail-worker...`)
+  shuttingDown = true
 
   try {
     if (subscriber.isOpen) {
@@ -317,6 +318,14 @@ async function shutdown(signal) {
     }
   } catch (err) {
     console.error('Error while closing Redis subscriber:', err.message)
+  }
+
+  try {
+    if (workerRedis.isOpen) {
+      await workerRedis.quit()
+    }
+  } catch (err) {
+    console.error('Error while closing queue Redis client:', err.message)
   }
 
   try {
