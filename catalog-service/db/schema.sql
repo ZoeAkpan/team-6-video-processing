@@ -60,9 +60,17 @@ CREATE INDEX IF NOT EXISTS idx_transcode_output_video_id ON transcode_output (vi
 
 
 CREATE TABLE IF NOT EXISTS thumbnail (
-    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    video_id    UUID        NOT NULL REFERENCES video (id) ON DELETE CASCADE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    video_id          UUID        NOT NULL REFERENCES video (id) ON DELETE CASCADE,
+    thumbnail_url     TEXT        NOT NULL,
+    timestamp_seconds INTEGER     NOT NULL DEFAULT 0 CHECK (timestamp_seconds >= 0),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE (video_id, timestamp_seconds)
 );
+
+ALTER TABLE thumbnail
+    ADD COLUMN IF NOT EXISTS thumbnail_url TEXT,
+    ADD COLUMN IF NOT EXISTS timestamp_seconds INTEGER NOT NULL DEFAULT 0;
 
 CREATE INDEX IF NOT EXISTS idx_thumbnail_video_id ON thumbnail (video_id);
