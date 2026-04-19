@@ -197,7 +197,7 @@ async function processTranscodeComplete(event) {
   // Marks which job is currently being handled, so that it 
   // can be reported in the health check 
   inFlightJobId = event.jobId
-  console.log(`thumbnail event received job=${event.jobId} video=${event.videoId}`)
+  console.log(`thumbnail processing started job=${event.jobId} video=${event.videoId}`)
 
   // Simulate time taken to process the thumbnail job.
   if (PROCESSING_DELAY_MS > 0) {
@@ -249,16 +249,21 @@ async function moveToDeadLetter(raw, errorMessage) {
 }
 
 async function handleTranscodeComplete(raw) {
+  let event
+
   try {
-    const event = parseTranscodeComplete(raw)
-    await processTranscodeComplete(event)
+    event = parseTranscodeComplete(raw)
+    await redis.rPush(QUEUE_NAME, raw)
+    const queueDepth = await redis.lLen(QUEUE_NAME)
+    console.log(
+      `thumbnail event received job=${event.jobId} video=${event.videoId} queued=true queueDepth=${queueDepth}`
+    )
   } catch (err) {
-    console.error('Thumbnail event failed:', err.message)
+    console.error('Thumbnail event enqueue failed:', err.message)
     await moveToDeadLetter(raw, err.message)
-  } finally {
-    inFlightJobId = null
   }
 }
+
 
 app.get('/health', async (_req, res) => {
   const snapshot = await getHealthSnapshot()
