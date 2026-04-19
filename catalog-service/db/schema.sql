@@ -77,4 +77,22 @@ UPDATE thumbnail
 SET thumbnail_url = '/thumbnails/' || video_id::text || '/0.jpg'
 WHERE thumbnail_url IS NULL;
 
+ALTER TABLE thumbnail
+    ALTER COLUMN thumbnail_url SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'thumbnail_timestamp_seconds_nonnegative'
+    ) THEN
+        ALTER TABLE thumbnail
+            ADD CONSTRAINT thumbnail_timestamp_seconds_nonnegative
+            CHECK (timestamp_seconds >= 0) NOT VALID;
+    END IF;
+END $$;
+
+
+
 CREATE INDEX IF NOT EXISTS idx_thumbnail_video_id ON thumbnail (video_id);
