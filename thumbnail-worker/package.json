@@ -1,0 +1,14 @@
+{
+  "name": "thumbnail-worker",
+  "version": "1.0.0",
+  "description": "Thumbnail Worker",
+  "type": "module",
+  "main": "worker.js",
+  "scripts": {
+    "start": "node worker.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1",
+    "redis": "^5.8.2"
+  }
+}
