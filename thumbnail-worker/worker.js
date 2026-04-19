@@ -175,3 +175,48 @@ app.use((_req, res) => {
     error: 'not found',
   })
 })
+
+async function shutdown(signal) {
+  console.log(`Received ${signal}. Shutting down thumbnail-worker...`)
+  shuttingDown = true
+
+  try {
+    if (workerRedis.isOpen) {
+      await workerRedis.quit()
+    }
+  } catch (err) {
+    console.error('Error while closing blocking Redis client:', err.message)
+  }
+
+  try {
+    if (redis.isOpen) {
+      await redis.quit()
+    }
+  } catch (err) {
+    console.error('Error while closing Redis client:', err.message)
+  }
+
+  process.exit(0)
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'))
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+
+async function start() {
+  try {
+    await redis.connect()
+    await workerRedis.connect()
+    await getLastSuccessfullyProcessedJobAt()
+
+    app.listen(PORT, () => {
+      console.log(`thumbnail-worker listening on port ${PORT}`)
+    })
+
+    await workerLoop()
+  } catch (err) {
+    console.error('Failed to start thumbnail-worker:', err)
+    process.exit(1)
+  }
+}
+
+start()
