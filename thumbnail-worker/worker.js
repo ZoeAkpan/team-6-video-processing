@@ -9,7 +9,6 @@ const app = express()
 const PORT = Number(process.env.PORT || 3005)
 const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
-const QUEUE_NAME = process.env.THUMBNAIL_QUEUE_NAME || 'thumbnail-jobs'
 const DEAD_LETTER_QUEUE_NAME =
   process.env.THUMBNAIL_DEAD_LETTER_QUEUE_NAME || 'thumbnail-dead-letter'
 const LAST_SUCCESS_KEY =
@@ -33,7 +32,7 @@ const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
 })
 const redis = createClient({ url: REDIS_URL })
-const workerRedis = createClient({ url: REDIS_URL })
+const subscriber = createClient({ url: REDIS_URL })
 
 let lastSuccessfullyProcessedJobAt = null
 let inFlightJobId = null
@@ -45,18 +44,6 @@ redis.on('error', (err) => {
 workerRedis.on('error', (err) => {
   console.error('Thumbnail worker blocking Redis error:', err.message)
 })
-
-async function getQueueDepths() {
-  const [queueDepth, deadLetterQueueDepth] = await Promise.all([
-    redis.lLen(QUEUE_NAME),
-    redis.lLen(DEAD_LETTER_QUEUE_NAME),
-  ])
-
-  return {
-    queueDepth,
-    deadLetterQueueDepth,
-  }
-}
 
 async function getLastSuccessfullyProcessedJobAt() {
   if (lastSuccessfullyProcessedJobAt) {
@@ -70,9 +57,14 @@ async function getLastSuccessfullyProcessedJobAt() {
 async function getHealthSnapshot() {
   let db = 'ok'
   let redisStatus = 'ok'
-  let queueDepth = null
   let deadLetterQueueDepth = null
   let lastSuccessfulJobAt = null
+
+  try {
+    await pool.query('SELECT 1')
+  } catch (err) {
+    db = `error: ${err.message}`
+  }
 
   try {
     const pong = await redis.ping()
@@ -80,22 +72,20 @@ async function getHealthSnapshot() {
       throw new Error(`unexpected ping response: ${pong}`)
     }
 
-    const depths = await getQueueDepths()
-    queueDepth = depths.queueDepth
     deadLetterQueueDepth = await redis.lLen(DEAD_LETTER_QUEUE_NAME)
     lastSuccessfulJobAt = await getLastSuccessfullyProcessedJobAt()
   } catch (err) {
     redisStatus = `error: ${err.message}`
   }
 
-  const healthy = redisStatus === 'ok'
+  const healthy = db === 'ok' && redisStatus === 'ok'
 
   return {
     healthy,
     body: {
       status: healthy ? 'healthy' : 'unhealthy',
+      db,
       redis: redisStatus,
-      queueDepth,
       deadLetterQueueDepth,
       lastSuccessfullyProcessedJobAt: lastSuccessfulJobAt,
       inFlightJobId,
@@ -134,6 +124,22 @@ function getDurationSeconds(event) {
   }
 
   return duration
+}
+
+function buildThumbnailReferences(event) {
+  const duration = getDurationSeconds(event)
+  const timestamps = [
+    Math.max(1, Math.floor(duration * 0.1)),
+    Math.max(1, Math.floor(duration * 0.5)),
+    Math.max(1, Math.floor(duration * 0.9)),
+  ]
+  const uniqueTimestamps = [...new Set(timestamps)]
+
+  return uniqueTimestamps.map((timestampSeconds) => ({
+    videoId: event.videoId,
+    timestampSeconds,
+    thumbnailUrl: `/thumbnails/${event.videoId}/${timestampSeconds}.jpg`,
+  }))
 }
 
 async function processJob(job) {
