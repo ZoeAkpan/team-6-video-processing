@@ -170,6 +170,42 @@ async function writeThumbnailReferences(thumbnailReferences) {
   }
 }
 
+async function processTranscodeComplete(event) {
+  // Marks which job is currently being handled, so that it 
+  // can be reported in the health check 
+  inFlightJobId = event.jobId
+
+  // Simulate time taken to process the thumbnail job.
+  if (PROCESSING_DELAY_MS > 0) {
+    await new Promise((resolve) => setTimeout(resolve, PROCESSING_DELAY_MS))
+  }
+
+  const thumbnailReferences = buildThumbnailReferences(event)
+  await writeThumbnailReferences(thumbnailReferences)
+
+  const processedAt = new Date().toISOString()
+  lastSuccessfullyProcessedJobAt = processedAt
+  await redis.set(LAST_SUCCESS_KEY, processedAt)
+  // Clear the catalog cache 
+  await redis.del(CATALOG_CACHE_KEY)
+
+  // Publishes a new event saying thumbnails are complete, along with the thumbnail references 
+  await redis.publish(
+    THUMBNAIL_COMPLETE_CHANNEL,
+    JSON.stringify({
+      jobId: event.jobId,
+      videoId: event.videoId,
+      status: 'complete',
+      thumbnails: thumbnailReferences,
+      processedAt,
+    })
+  )
+
+  console.log(
+    `thumbnail job=${event.jobId} video=${event.videoId} refs=${thumbnailReferences.length} status=complete`
+  )
+}
+
 
 async function processJob(job) {
   inFlightJobId = job.jobId
