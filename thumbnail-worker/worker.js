@@ -61,9 +61,22 @@ async function getLastSuccessfullyProcessedJobAt() {
   return lastSuccessfullyProcessedJobAt
 }
 
+async function getQueueDepths() {
+  const [queueDepth, deadLetterQueueDepth] = await Promise.all([
+    redis.lLen(QUEUE_NAME),
+    redis.lLen(DEAD_LETTER_QUEUE_NAME),
+  ])
+
+  return {
+    queueDepth,
+    deadLetterQueueDepth,
+  }
+}
+
 async function getHealthSnapshot() {
   let db = 'ok'
   let redisStatus = 'ok'
+  let queueDepth = null
   let deadLetterQueueDepth = null
   let lastSuccessfulJobAt = null
 
@@ -79,7 +92,9 @@ async function getHealthSnapshot() {
       throw new Error(`unexpected ping response: ${pong}`)
     }
 
-    deadLetterQueueDepth = await redis.lLen(DEAD_LETTER_QUEUE_NAME)
+    const depths = await getQueueDepths()
+    queueDepth = depths.queueDepth
+    deadLetterQueueDepth = depths.deadLetterQueueDepth
     lastSuccessfulJobAt = await getLastSuccessfullyProcessedJobAt()
   } catch (err) {
     redisStatus = `error: ${err.message}`
@@ -93,6 +108,7 @@ async function getHealthSnapshot() {
       status: healthy ? 'healthy' : 'unhealthy',
       db,
       redis: redisStatus,
+      queueDepth,
       deadLetterQueueDepth,
       lastSuccessfullyProcessedJobAt: lastSuccessfulJobAt,
       inFlightJobId,
