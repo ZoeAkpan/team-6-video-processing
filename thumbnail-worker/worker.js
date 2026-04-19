@@ -9,6 +9,7 @@ const app = express()
 const PORT = Number(process.env.PORT || 3005)
 const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
+const QUEUE_NAME = process.env.THUMBNAIL_QUEUE_NAME || 'thumbnail-jobs'
 const DEAD_LETTER_QUEUE_NAME =
   process.env.THUMBNAIL_DEAD_LETTER_QUEUE_NAME || 'thumbnail-dead-letter'
 const LAST_SUCCESS_KEY =
@@ -36,7 +37,6 @@ const workerRedis = createClient({ url: REDIS_URL })
 
 let lastSuccessfullyProcessedJobAt = null
 let inFlightJobId = null
-let shuttingDown = false
 
 redis.on('error', (err) => {
   console.error('Thumbnail worker Redis error:', err.message)
@@ -68,6 +68,7 @@ async function getLastSuccessfullyProcessedJobAt() {
 }
 
 async function getHealthSnapshot() {
+  let db = 'ok'
   let redisStatus = 'ok'
   let queueDepth = null
   let deadLetterQueueDepth = null
@@ -98,30 +99,32 @@ async function getHealthSnapshot() {
       deadLetterQueueDepth,
       lastSuccessfullyProcessedJobAt: lastSuccessfulJobAt,
       inFlightJobId,
+      subscribedChannels: TRANSCODE_COMPLETE_CHANNELS,
       timestamp: new Date().toISOString(),
     },
   }
 }
 
-function parseJob(raw) {
-  let job
+function parseTranscodeComplete(raw) {
+  let event
 
   try {
-    job = JSON.parse(raw)
+    event = JSON.parse(raw)
   } catch (err) {
     throw new Error(`invalid json: ${err.message}`)
   }
 
-  if (!job || typeof job !== 'object') {
-    throw new Error('job payload must be an object')
+  if (!event || typeof event !== 'object') {
+    throw new Error('event payload must be an object')
   }
 
-  if (!job.jobId || !job.videoId) {
+  if (!event.jobId || !event.videoId) {
     throw new Error('jobId and videoId are required')
   }
 
-  return job
+  return event
 }
+
 
 async function processJob(job) {
   inFlightJobId = job.jobId
