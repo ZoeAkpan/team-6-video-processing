@@ -1,11 +1,14 @@
 import express from 'express'
+import pg from 'pg'
 import { createClient } from 'redis'
 
+const { Pool } = pg
 const app = express()
 
+
 const PORT = Number(process.env.PORT || 3005)
+const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
-const QUEUE_NAME = process.env.THUMBNAIL_QUEUE_NAME || 'thumbnail-jobs'
 const DEAD_LETTER_QUEUE_NAME =
   process.env.THUMBNAIL_DEAD_LETTER_QUEUE_NAME || 'thumbnail-dead-letter'
 const LAST_SUCCESS_KEY =
@@ -13,8 +16,21 @@ const LAST_SUCCESS_KEY =
   'thumbnail-worker:last-successfully-processed-job-at'
 const THUMBNAIL_COMPLETE_CHANNEL =
   process.env.THUMBNAIL_COMPLETE_CHANNEL || 'thumbnail.complete'
-const PROCESSING_DELAY_MS = Number(process.env.THUMBNAIL_PROCESSING_DELAY_MS || 250)
+const TRANSCODE_COMPLETE_CHANNELS = (
+  process.env.TRANSCODE_COMPLETE_CHANNELS ||
+  process.env.TRANSCODE_COMPLETE_CHANNEL ||
+  'transcode-complete,transcode.complete'
+)
+  .split(',')
+  .map((channel) => channel.trim())
+  .filter(Boolean)
 
+const PROCESSING_DELAY_MS = Number(process.env.THUMBNAIL_PROCESSING_DELAY_MS || 250)
+const CATALOG_CACHE_KEY = process.env.CATALOG_CACHE_KEY || 'catalog:videos:available'
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+})
 const redis = createClient({ url: REDIS_URL })
 const workerRedis = createClient({ url: REDIS_URL })
 
