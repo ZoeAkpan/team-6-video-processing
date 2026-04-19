@@ -174,6 +174,7 @@ async function processTranscodeComplete(event) {
   // Marks which job is currently being handled, so that it 
   // can be reported in the health check 
   inFlightJobId = event.jobId
+  console.log(`thumbnail event received job=${event.jobId} video=${event.videoId}`)
 
   // Simulate time taken to process the thumbnail job.
   if (PROCESSING_DELAY_MS > 0) {
@@ -181,7 +182,13 @@ async function processTranscodeComplete(event) {
   }
 
   const thumbnailReferences = buildThumbnailReferences(event)
+  console.log(
+    `thumbnail extracting simulated refs job=${event.jobId} count=${thumbnailReferences.length}`
+  )
   await writeThumbnailReferences(thumbnailReferences)
+  console.log(
+    `thumbnail wrote refs job=${event.jobId} video=${event.videoId} count=${thumbnailReferences.length}`
+  )
 
   const processedAt = new Date().toISOString()
   lastSuccessfullyProcessedJobAt = processedAt
@@ -200,6 +207,7 @@ async function processTranscodeComplete(event) {
       processedAt,
     })
   )
+  console.log(`thumbnail published complete job=${event.jobId}`)
 
   console.log(
     `thumbnail job=${event.jobId} video=${event.videoId} refs=${thumbnailReferences.length} status=complete`
