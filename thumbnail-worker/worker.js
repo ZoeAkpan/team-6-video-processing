@@ -164,3 +164,14 @@ async function workerLoop() {
     }
   }
 }
+
+app.get('/health', async (_req, res) => {
+  const snapshot = await getHealthSnapshot()
+  return res.status(snapshot.healthy ? 200 : 503).json(snapshot.body)
+})
+
+app.use((_req, res) => {
+  return res.status(404).json({
+    error: 'not found',
+  })
+})
