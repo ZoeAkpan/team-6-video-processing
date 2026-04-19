@@ -143,6 +143,32 @@ function buildThumbnailReferences(event) {
   }))
 }
 
+async function writeThumbnailReferences(thumbnailReferences) {
+  const client = await pool.connect()
+
+  try {
+    await client.query('BEGIN')
+
+    for (const thumbnail of thumbnailReferences) {
+      await client.query(
+        `
+          INSERT INTO thumbnail (video_id, thumbnail_url, timestamp_seconds)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (video_id, timestamp_seconds)
+          DO UPDATE SET thumbnail_url = EXCLUDED.thumbnail_url
+        `,
+        [thumbnail.videoId, thumbnail.thumbnailUrl, thumbnail.timestampSeconds]
+      )
+    }
+
+    await client.query('COMMIT')
+  } catch (err) {
+    await client.query('ROLLBACK')
+    throw err
+  } finally {
+    client.release()
+  }
+}
 
 
 async function processJob(job) {
