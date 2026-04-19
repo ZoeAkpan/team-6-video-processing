@@ -242,14 +242,13 @@ app.use((_req, res) => {
 
 async function shutdown(signal) {
   console.log(`Received ${signal}. Shutting down thumbnail-worker...`)
-  shuttingDown = true
 
   try {
-    if (workerRedis.isOpen) {
-      await workerRedis.quit()
+    if (subscriber.isOpen) {
+      await subscriber.quit()
     }
   } catch (err) {
-    console.error('Error while closing blocking Redis client:', err.message)
+    console.error('Error while closing Redis subscriber:', err.message)
   }
 
   try {
@@ -258,6 +257,12 @@ async function shutdown(signal) {
     }
   } catch (err) {
     console.error('Error while closing Redis client:', err.message)
+  }
+
+  try {
+    await pool.end()
+  } catch (err) {
+    console.error('Error while closing Postgres pool:', err.message)
   }
 
   process.exit(0)
