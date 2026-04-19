@@ -41,8 +41,8 @@ redis.on('error', (err) => {
   console.error('Thumbnail worker Redis error:', err.message)
 })
 
-workerRedis.on('error', (err) => {
-  console.error('Thumbnail worker blocking Redis error:', err.message)
+subscriber.on('error', (err) => {
+  console.error('Thumbnail worker subscriber Redis error:', err.message)
 })
 
 async function getLastSuccessfullyProcessedJobAt() {
@@ -114,7 +114,7 @@ function parseTranscodeComplete(raw) {
 
   return event
 }
-
+// figure out the video duration 
 function getDurationSeconds(event) {
   const rawDuration = event.metadata?.duration ?? event.durationSeconds ?? 30
   const duration = Number.parseInt(rawDuration, 10)
@@ -126,6 +126,7 @@ function getDurationSeconds(event) {
   return duration
 }
 
+// build fake thumbnail references (simulates extracting 3 thumbnails at different timestamps in the video)
 function buildThumbnailReferences(event) {
   const duration = getDurationSeconds(event)
   const timestamps = [
@@ -141,6 +142,8 @@ function buildThumbnailReferences(event) {
     thumbnailUrl: `/thumbnails/${event.videoId}/${timestampSeconds}.jpg`,
   }))
 }
+
+
 
 async function processJob(job) {
   inFlightJobId = job.jobId
