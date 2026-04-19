@@ -93,6 +93,20 @@ BEGIN
     END IF;
 END $$;
 
+ALTER TABLE thumbnail
+    VALIDATE CONSTRAINT thumbnail_timestamp_seconds_nonnegative;
 
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'thumbnail_video_id_timestamp_seconds_key'
+    ) THEN
+        ALTER TABLE thumbnail
+            ADD CONSTRAINT thumbnail_video_id_timestamp_seconds_key
+            UNIQUE (video_id, timestamp_seconds);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_thumbnail_video_id ON thumbnail (video_id);
