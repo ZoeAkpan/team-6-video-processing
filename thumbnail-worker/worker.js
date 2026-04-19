@@ -352,6 +352,7 @@ async function start() {
   try {
     await redis.connect()
     await subscriber.connect()
+    await workerRedis.connect()
     await pool.query('SELECT 1')
     await getLastSuccessfullyProcessedJobAt()
 
@@ -362,7 +363,10 @@ async function start() {
       console.log(
         `thumbnail-worker subscribed to ${TRANSCODE_COMPLETE_CHANNELS.join(', ')}`
       )
+      console.log(`thumbnail-worker consuming queue ${QUEUE_NAME}`)
     })
+
+    await workerLoop()
   } catch (err) {
     console.error('Failed to start thumbnail-worker:', err)
     process.exit(1)
