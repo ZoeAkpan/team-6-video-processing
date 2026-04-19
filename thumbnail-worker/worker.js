@@ -20,6 +20,7 @@ const workerRedis = createClient({ url: REDIS_URL })
 
 let lastSuccessfullyProcessedJobAt = null
 let inFlightJobId = null
+let shuttingDown = false
 
 redis.on('error', (err) => {
   console.error('Thumbnail worker Redis error:', err.message)
@@ -83,5 +84,83 @@ async function getHealthSnapshot() {
       inFlightJobId,
       timestamp: new Date().toISOString(),
     },
+  }
+}
+
+function parseJob(raw) {
+  let job
+
+  try {
+    job = JSON.parse(raw)
+  } catch (err) {
+    throw new Error(`invalid json: ${err.message}`)
+  }
+
+  if (!job || typeof job !== 'object') {
+    throw new Error('job payload must be an object')
+  }
+
+  if (!job.jobId || !job.videoId) {
+    throw new Error('jobId and videoId are required')
+  }
+
+  return job
+}
+
+async function processJob(job) {
+  inFlightJobId = job.jobId
+
+  if (PROCESSING_DELAY_MS > 0) {
+    await new Promise((resolve) => setTimeout(resolve, PROCESSING_DELAY_MS))
+  }
+
+  const processedAt = new Date().toISOString()
+  lastSuccessfullyProcessedJobAt = processedAt
+  await redis.set(LAST_SUCCESS_KEY, processedAt)
+
+  await redis.publish(
+    THUMBNAIL_COMPLETE_CHANNEL,
+    JSON.stringify({
+      jobId: job.jobId,
+      videoId: job.videoId,
+      status: 'complete',
+      thumbnailUrl: job.thumbnailUrl || `/thumbnails/${job.videoId}.jpg`,
+      processedAt,
+    })
+  )
+
+  console.log(`thumbnail job=${job.jobId} video=${job.videoId} status=complete`)
+}
+
+async function moveToDeadLetter(raw, errorMessage) {
+  await redis.lPush(
+    DEAD_LETTER_QUEUE_NAME,
+    JSON.stringify({
+      raw,
+      error: errorMessage,
+      failedAt: new Date().toISOString(),
+    })
+  )
+}
+
+async function workerLoop() {
+  while (!shuttingDown) {
+    let raw
+
+    try {
+      const result = await workerRedis.brPop(QUEUE_NAME, 1)
+      raw = result?.element
+      if (!raw) continue
+
+      const job = parseJob(raw)
+      await processJob(job)
+    } catch (err) {
+      console.error('Thumbnail job failed:', err.message)
+      if (raw) {
+        await moveToDeadLetter(raw, err.message)
+      }
+    } finally {
+      inFlightJobId = null
+    }
   }
 }
