@@ -82,7 +82,7 @@ async function getHealthSnapshot() {
 
     const depths = await getQueueDepths()
     queueDepth = depths.queueDepth
-    deadLetterQueueDepth = depths.deadLetterQueueDepth
+    deadLetterQueueDepth = await redis.lLen(DEAD_LETTER_QUEUE_NAME)
     lastSuccessfulJobAt = await getLastSuccessfullyProcessedJobAt()
   } catch (err) {
     redisStatus = `error: ${err.message}`
@@ -125,6 +125,16 @@ function parseTranscodeComplete(raw) {
   return event
 }
 
+function getDurationSeconds(event) {
+  const rawDuration = event.metadata?.duration ?? event.durationSeconds ?? 30
+  const duration = Number.parseInt(rawDuration, 10)
+
+  if (!Number.isFinite(duration) || duration <= 0) {
+    return 30
+  }
+
+  return duration
+}
 
 async function processJob(job) {
   inFlightJobId = job.jobId
