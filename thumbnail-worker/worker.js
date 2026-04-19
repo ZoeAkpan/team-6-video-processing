@@ -276,6 +276,27 @@ async function processQueuedEvent(raw) {
   }
 }
 
+async function workerLoop() {
+  while (!shuttingDown) {
+    let raw
+
+    try {
+      const result = await workerRedis.brPop(QUEUE_NAME, 1)
+      raw = result?.element
+      if (!raw) continue
+
+      await processQueuedEvent(raw)
+    } catch (err) {
+      if (shuttingDown) break
+
+      console.error('Thumbnail queue processing failed:', err.message)
+      if (raw) {
+        await moveToDeadLetter(raw, err.message)
+      }
+    }
+  }
+}
+
 app.get('/health', async (_req, res) => {
   const snapshot = await getHealthSnapshot()
   return res.status(snapshot.healthy ? 200 : 503).json(snapshot.body)
