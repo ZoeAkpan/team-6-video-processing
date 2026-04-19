@@ -19,6 +19,7 @@ const redis = createClient({ url: REDIS_URL })
 const workerRedis = createClient({ url: REDIS_URL })
 
 let lastSuccessfullyProcessedJobAt = null
+let inFlightJobId = null
 
 redis.on('error', (err) => {
   console.error('Thumbnail worker Redis error:', err.message)
@@ -47,4 +48,40 @@ async function getLastSuccessfullyProcessedJobAt() {
 
   lastSuccessfullyProcessedJobAt = await redis.get(LAST_SUCCESS_KEY)
   return lastSuccessfullyProcessedJobAt
+}
+
+async function getHealthSnapshot() {
+  let redisStatus = 'ok'
+  let queueDepth = null
+  let deadLetterQueueDepth = null
+  let lastSuccessfulJobAt = null
+
+  try {
+    const pong = await redis.ping()
+    if (pong !== 'PONG' && pong !== 'pong') {
+      throw new Error(`unexpected ping response: ${pong}`)
+    }
+
+    const depths = await getQueueDepths()
+    queueDepth = depths.queueDepth
+    deadLetterQueueDepth = depths.deadLetterQueueDepth
+    lastSuccessfulJobAt = await getLastSuccessfullyProcessedJobAt()
+  } catch (err) {
+    redisStatus = `error: ${err.message}`
+  }
+
+  const healthy = redisStatus === 'ok'
+
+  return {
+    healthy,
+    body: {
+      status: healthy ? 'healthy' : 'unhealthy',
+      redis: redisStatus,
+      queueDepth,
+      deadLetterQueueDepth,
+      lastSuccessfullyProcessedJobAt: lastSuccessfulJobAt,
+      inFlightJobId,
+      timestamp: new Date().toISOString(),
+    },
+  }
 }
