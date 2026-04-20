@@ -152,7 +152,7 @@ curl http://localhost:3002/videos
   }
 ]
 ```
-
+> Results are cached in Redis for 60 seconds (`catalog:videos:available`). Cache is invalidated automatically when a video is marked unavailable via the `video.rejected` pub/sub event.
 ---
 
 ## upload-service

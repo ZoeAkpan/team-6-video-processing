@@ -25,8 +25,8 @@ async function processJob(job) {
         return;
     }
 
-    if (existing.status === 'done') {
-        console.log(`job=${job.jobId} already done, skipping`);
+    if (existing.status === 'complete') {
+        console.log(`job=${job.jobId} already complete, skipping`);
         return;
     }
 
@@ -43,28 +43,32 @@ async function processJob(job) {
     });
 
     // Sleep proportional to video duration
-    const duration = parseInt(job.duration, 10);
+    const duration = parseInt(job.metadata.duration, 10);
     console.log(`job ${job.jobId} processing for ${duration}s`);
     await new Promise((resolve) => setTimeout(resolve, duration * 1000));
     console.log(`job ${job.jobId} processing complete`);
 
     const finishedAt = new Date().toISOString();
     await saveJobStatus(job.jobId, {
-        status: 'done',
+        status: 'complete',
         updatedAt: finishedAt,
         finishedAt,
     });
 
-    await client.publish('transcode-updates', JSON.stringify({
-        // TODO: adjust field names when job schema is finalized
+    await client.publish('transcode-complete', JSON.stringify({
         jobId: job.jobId,
         videoId: job.videoId,
-        status: 'done',
+        originalFilename: job.originalFilename,
+        contentType: job.contentType,
+        fileSizeBytes: job.fileSizeBytes,
+        uploadedBy: job.uploadedBy,
+        metadata: job.metadata,
+        status: 'complete',
         updatedAt: finishedAt,
-        outputFormats: job.outputFormats || [],
+        finishedAt,
     }));
 
-    console.log(`job=${job.jobId} status=done`);
+    console.log(`job=${job.jobId} status=complete`);
 }
 
 async function loop() {
@@ -89,9 +93,20 @@ async function loop() {
             continue
         }
 
-        // Check for malformed fields -> push to dead-letter queue
-        if (!job.videoId || !job.duration || !job.sourcePath) {
+        if (!job.videoId ||
+            !job.originalFilename || 
+            !job.contentType || 
+            !job.fileSizeBytes || 
+            !job.uploadedBy || 
+            !job.metadata        
+        ) {
             console.error('Invalid transcode job payload: missing required fields', job)
+            await client.lPush('transcode-dead-letter', raw) // Push to dead-letter queue
+            continue
+        }
+
+        if (!job.metadata.duration) {
+            console.error('Invalid transcode job payload: missing duration in metadata', job)
             await client.lPush('transcode-dead-letter', raw) // Push to dead-letter queue
             continue
         }

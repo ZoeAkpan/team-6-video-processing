@@ -29,9 +29,9 @@ async function runLoadTest(numJobs = 100, jobDuration = 1) {
         resolveAllJobs = resolve;
     });
 
-    await subscriber.subscribe('transcode-updates', (message) => {
+    await subscriber.subscribe('transcode-complete', (message) => {
         const update = JSON.parse(message);
-        if (update.status === 'done') {
+        if (update.status === 'complete') {
             completedJobs++;
             console.log(`Job ${update.jobId} completed. Total completed: ${completedJobs}/${numJobs}`);
         }
@@ -50,12 +50,15 @@ async function runLoadTest(numJobs = 100, jobDuration = 1) {
     for (let i = 0; i < numJobs; i++) {
         const jobId = `loadtest-${Date.now()}-${i}`;
         const job = {
-            // TODO: adjust field names when job schema is finalized
             jobId,
             videoId: `video-${jobId}`,
-            duration: jobDuration.toString(),
-            sourcePath: '/tmp/test.mp4',
-            outputFormats: ['mp4'],
+            originalFilename: `test-video-${i}.mp4`,
+            contentType: 'video/mp4',
+            fileSizeBytes: 1024 * 1024,
+            uploadedBy: 'loadtest-user',
+            metadata: {
+                duration: jobDuration,
+            },
         };
 
         await client.hSet(`job:${jobId}`, 'status', 'pending');
