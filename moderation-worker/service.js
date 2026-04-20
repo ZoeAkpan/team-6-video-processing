@@ -77,11 +77,14 @@ function simulateContentReview(videoData) {
   const status = approved ? 'approved' : 'rejected'
   const reason = approved ? 'passed_automated_review' : 'rejected_automated_review'
 
+  console.log(`Completed content review for video ${videoData.videoId}. Result: ${status}`)
   
   return [ approved, status, reason ]
 }
 
 async function handleTranscodeComplete(rawMessage) {
+  console.log(`Received ${TRANSCODE_COMPLETE_EVENT} with payload: ${rawMessage}`)
+
   if (!isValidPayload(rawMessage)) {
     // poison pill handling
     // will be done in sprint 3
@@ -121,7 +124,7 @@ async function handleTranscodeComplete(rawMessage) {
     [videoId, status, reason, JSON.stringify(payload)]
   )
 
-  console.log('Moderation recorded', { videoId, status, reason })
+  console.log('Moderation recorded to database', { videoId, status, reason })
 
   if (!approved) {
     await redis.publish(
@@ -133,6 +136,7 @@ async function handleTranscodeComplete(rawMessage) {
         moderatedAt: new Date().toISOString(),
       })
     )
+    console.log(`Published ${VIDEO_REJECTED_EVENT} event`)
   }
 }
 
