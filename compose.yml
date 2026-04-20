@@ -365,6 +365,50 @@ services:
       retries: 3
       start_period: 15s
 
+  search-index-worker:
+    build: ./search-index-worker
+    container_name: search-index-worker
+    restart: unless-stopped
+    ports:
+      - "3006:3006"
+    networks:
+      - team-net
+    environment:
+      - DATABASE_URL=postgres://user:pass@search-db:5432/search
+      - REDIS_URL=redis://redis:6379
+      - TRANSCODE_COMPLETE_CHANNEL=transcode_complete
+      - PORT=3006
+    depends_on:
+      search-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+  
+  search-db:
+    image: postgres:16
+    container_name: search-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: search
+    volumes:
+      - search-db-data:/var/lib/postgresql/data
+      - ./search-index-worker/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d search"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 # ── Named volumes ──────────────────────────────────────────────────────────────
 # Declare a volume for each database here, e.g.:
 #
@@ -377,3 +421,4 @@ volumes:
   moderation-db-data:
   playback-db-data:
   upload-db-data:
+  search-db-data:
