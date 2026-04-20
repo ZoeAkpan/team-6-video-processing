@@ -310,7 +310,7 @@ services:
       POSTGRES_PASSWORD: pass
       POSTGRES_DB: upload_db
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - upload-db-data:/var/lib/postgresql/data
       - ./upload-service/db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
@@ -328,7 +328,7 @@ services:
     container_name: upload-service
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3006:3000"
     networks:
       - team-net
     environment:

@@ -45,18 +45,20 @@ export default function () {
     "body is json-like": (r) => r.body.startsWith("[") || r.body.startsWith("{"),
   });
 
+  const cacheHeader = "X-Cache";
+  if (res.headers[cacheHeader]) {
+    if (res.headers[cacheHeader] === "HIT") {
+        cacheHitRate.add(1);
+        cacheMissRate.add(0);
+    } else if (res.headers[cacheHeader] === "MISS") {
+        cacheHitRate.add(0);
+        cacheMissRate.add(1);
+    }
+}
+
   errorRate.add(!ok);
   sleep(0.5);
 }
 
-const cacheHeader = "X-Cache";
-if (res.headers[cacheHeader]) {
-  if (res.headers[cacheHeader] === "HIT") {
-    cacheHitRate.add(1);
-    cacheMissRate.add(0);
-  } else if (res.headers[cacheHeader] === "MISS") {
-    cacheHitRate.add(0);
-    cacheMissRate.add(1);
-  }
-}
+
 
