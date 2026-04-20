@@ -64,7 +64,7 @@ app.get("/video/search", async (req,res) => {
     }
 
     const result = await pool.query(
-      `SELECT * FROM video WHERE title ILIKE $1 AND status = 'available' ORDER BY created_at DESC`, [`%${q}%1`]
+      `SELECT * FROM video WHERE title ILIKE $1 AND status = 'available' ORDER BY created_at DESC`, [`%${q}%`]
     );
 
     res.json(result.rows);
@@ -82,6 +82,31 @@ redisSub.subscribe("video.rejected", async (message) => {
     console.error("[moderation-sub] error:", err.message);
   }
 });
+
+app.get("/video/:id", async (req, res) => {
+  const {id} = req.params;
+
+  try {
+    const cached = await redisClient.get(`video: ${id}`);
+    if (cached) {
+      return res.json(JSON.parse(cached));
+    }
+
+    const result = await pool.query(
+      `SELECT * FROM video WHERE id = $1 AND status = 'available'`, [id]
+    )
+
+    if (result.rows.length === 0){
+      return res.status(404).json({ error: "video not found"});
+    }
+
+    const video = result.rows[0];
+    await redisClient.set(`video:${id}`, JSON.stringify(video), {EX:60});
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message});
+  }
+})
 
 const PORT = process.env.PORT || 3002;
 app.listen(PORT, () => console.log(`catalog-service running on port ${PORT}`));
