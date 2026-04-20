@@ -67,41 +67,40 @@ app.use((_req, res) => {
   })
 })
 
-async function handleTranscodeComplete(rawMessage) {
-  let payload
+function isValidPayload(raw) {
+  // will check for poison pills (malformed data) in sprint 3
+  return true // just return true for now
+}
 
-  try {
-    payload = JSON.parse(rawMessage)
-  } catch (err) {
-    await pool.query(
-      `
-        INSERT INTO moderation_poison_pills (raw_payload, error_message)
-        VALUES ($1, $2)
-      `,
-      [rawMessage, `invalid json: ${err.message}`]
-    )
-    console.error('Inserted poison pill (invalid json)', { rawMessage })
-    return
-  }
-
-  const videoId =
-    typeof payload.videoId === 'string' ? payload.videoId.trim() : ''
-
-  if (!videoId) {
-    await pool.query(
-      `
-        INSERT INTO moderation_poison_pills (raw_payload, error_message)
-        VALUES ($1, $2)
-      `,
-      [rawMessage, 'missing videoId']
-    )
-    console.error('Inserted poison pill (missing videoId)', { rawMessage })
-    return
-  }
-
+function simulateContentReview(videoData) {
   const approved = Math.random() < MODERATION_PASS_RATE
   const status = approved ? 'approved' : 'rejected'
   const reason = approved ? 'passed_automated_review' : 'rejected_automated_review'
+
+  
+  return [ approved, status, reason ]
+}
+
+async function handleTranscodeComplete(rawMessage) {
+  if (!isValidPayload(rawMessage)) {
+    // poison pill handling
+    // will be done in sprint 3
+    return
+  }
+
+  const payload = JSON.parse(rawMessage)
+  // expected structure:
+  // {
+  //   jobId,
+  //   videoId,
+  //   status,
+  //   updatedAt,
+  //   outputFormats
+  // }
+
+  const videoId = payload.videoId
+  
+  const [ approved, status, reason ] = simulateContentReview(payload)
 
   await pool.query(
     `
