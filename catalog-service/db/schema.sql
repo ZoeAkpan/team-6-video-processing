@@ -60,9 +60,53 @@ CREATE INDEX IF NOT EXISTS idx_transcode_output_video_id ON transcode_output (vi
 
 
 CREATE TABLE IF NOT EXISTS thumbnail (
-    id          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-    video_id    UUID        NOT NULL REFERENCES video (id) ON DELETE CASCADE,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    id                UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    video_id          UUID        NOT NULL REFERENCES video (id) ON DELETE CASCADE,
+    thumbnail_url     TEXT        NOT NULL,
+    timestamp_seconds INTEGER     NOT NULL DEFAULT 0 CHECK (timestamp_seconds >= 0),
+    created_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE (video_id, timestamp_seconds)
 );
+
+ALTER TABLE thumbnail
+    ADD COLUMN IF NOT EXISTS thumbnail_url TEXT,
+    ADD COLUMN IF NOT EXISTS timestamp_seconds INTEGER NOT NULL DEFAULT 0;
+
+UPDATE thumbnail
+SET thumbnail_url = '/thumbnails/' || video_id::text || '/0.jpg'
+WHERE thumbnail_url IS NULL;
+
+ALTER TABLE thumbnail
+    ALTER COLUMN thumbnail_url SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'thumbnail_timestamp_seconds_nonnegative'
+    ) THEN
+        ALTER TABLE thumbnail
+            ADD CONSTRAINT thumbnail_timestamp_seconds_nonnegative
+            CHECK (timestamp_seconds >= 0) NOT VALID;
+    END IF;
+END $$;
+
+ALTER TABLE thumbnail
+    VALIDATE CONSTRAINT thumbnail_timestamp_seconds_nonnegative;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'thumbnail_video_id_timestamp_seconds_key'
+    ) THEN
+        ALTER TABLE thumbnail
+            ADD CONSTRAINT thumbnail_video_id_timestamp_seconds_key
+            UNIQUE (video_id, timestamp_seconds);
+    END IF;
+END $$;
 
 CREATE INDEX IF NOT EXISTS idx_thumbnail_video_id ON thumbnail (video_id);
