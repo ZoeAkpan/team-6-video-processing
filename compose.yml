@@ -135,6 +135,24 @@ services:
     restart: unless-stopped
     ports:
       - "3007:3007"
+    networks:
+      - team-net
+    environment:
+      PORT: 3007
+      DATABASE_URL: postgres://moderation:moderation@moderation-db:5432/moderation
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      moderation-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   playback-db:
     image: postgres:16
     container_name: playback-db
@@ -163,7 +181,7 @@ services:
       - team-net
     environment:
       PORT: 3003
-      DATABASE_URL: postgres://moderation:moderation@moderation-db:5432/moderation
+      DATABASE_URL: postgres://playback:playback@playback-db:5432/playback
       REDIS_URL: redis://redis:6379
       TRANSCODE_COMPLETE_CHANNEL: transcode.complete
       VIDEO_REJECTED_CHANNEL: video.rejected
@@ -254,6 +272,35 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+
+  thumbnail-worker:
+    build: ./thumbnail-worker
+    container_name: thumbnail-worker
+    restart: unless-stopped
+    networks:
+      - team-net
+    ports:
+      - "3005:3005"
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://catalog:catalog@catalog-db:5432/catalog
+      PORT: 3005
+      THUMBNAIL_QUEUE_NAME: thumbnail-jobs
+      THUMBNAIL_DEAD_LETTER_QUEUE_NAME: thumbnail-dead-letter
+      TRANSCODE_COMPLETE_CHANNELS: transcode-complete,transcode.complete
+      THUMBNAIL_PROCESSING_DELAY_MS: 1000
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   upload-db:
     image: postgres:16
     container_name: upload-db
