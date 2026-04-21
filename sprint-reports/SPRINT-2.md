@@ -65,13 +65,9 @@ The transcode now has a health endpoint that provides the health of the containe
 - [ ] Worker `GET /health` returns queue depth, DLQ depth, and last-job-at
 
 
----
-
 
 ## What Is Not Working / Cut
 
-
----
 
 
 ## k6 Results
@@ -81,7 +77,7 @@ The transcode now has a health endpoint that provides the health of the containe
 
 
 
-
+```
         /\      Grafana   /‾‾/ 
    /\  /  \     |\  __   /  /  
   /  \/    \    | |/ /  /   ‾‾\
@@ -171,28 +167,100 @@ default ✓ [======================================] 00/20 VUs  1m10s
 
 
 Caching reduced p66 by 28%, p95 by 9%, and p50 by 17% just with 5 seeded videos. The difference would likely be even larger with additional videos added to the dataset, as Postgres query time grows with the amount of data. But even with a limited number of videos, there's a clear benefit to caching: better traffic handling.
-
+```
+---
 
 ### Test 2: Async Pipeline Burst (`k6/sprint-2-async.js`)
 
 
 ```
-[Paste k6 summary output here]
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+
+     execution: local
+        script: /workspace/k6/sprint-2-async.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 20 max VUs, 1m40s max duration (incl. graceful stop):
+              * default: Up to 20 looping VUs for 1m10s over 3 stages (gracefulRampDown: 30s, gracefulStop: 30s)
+
+
+
+  █ THRESHOLDS 
+
+    errors
+    ✓ 'rate<0.05' rate=0.00%
+
+    http_req_failed
+    ✓ 'rate<0.05' rate=0.00%
+
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 3740    49.28738/s
+    checks_succeeded...: 100.00% 3740 out of 3740
+    checks_failed......: 0.00%   0 out of 3740
+
+    ✓ status is 201
+    ✓ upload was accepted
+
+    CUSTOM
+    errors.........................: 0.00%  0 out of 1870
+    uploads_accepted...............: 1870   24.64369/s
+
+    HTTP
+    http_req_duration..............: avg=43.77ms  min=6.03ms   med=30.91ms  max=2.03s    p(50)=30.91ms  p(95)=98.14ms  p(99)=161.97ms
+      { expected_response:true }...: avg=43.77ms  min=6.03ms   med=30.91ms  max=2.03s    p(50)=30.91ms  p(95)=98.14ms  p(99)=161.97ms
+    http_req_failed................: 0.00%  0 out of 1870
+    http_reqs......................: 1870   24.64369/s
+
+    EXECUTION
+    iteration_duration.............: avg=540.73ms min=506.48ms med=531.96ms max=730.26ms p(50)=531.96ms p(95)=598.85ms p(99)=657.47ms
+    iterations.....................: 1870   24.64369/s
+    vus............................: 1      min=1         max=20
+    vus_max........................: 20     min=20        max=20
+
+    NETWORK
+    data_received..................: 1.8 MB 23 kB/s
+    data_sent......................: 510 kB 6.7 kB/s
+
+
+
+
+running (1m15.9s), 00/20 VUs, 1870 complete and 0 interrupted iterations
+default ✓ [======================================] 00/20 VUs  1m10s
+
+The transcode-worker is responding quickly, allowing each VU to quickly complete instead of waiting for the video transcoding to finish. The transcode queue depth fluctuates as the worker processes jobs, as indicated by hitting the worker's health endpoint.
 ```
 
 
 Worker health during the burst (hit `/health` while k6 is running):
 
 
-```json
-[Paste an example health response showing non-zero queue depth]
+```bash
+curl http://localhost:3004/health
 ```
 
-
-Idempotency check: [Describe what you sent and what happened when you sent the same idempotency key twice.]
-
-
----
+```json
+{
+"status": "healthy",
+"service": "transcode-worker",
+"timestamp": "2026-04-21T14:46:22.548Z",
+"uptime_seconds": 140,
+"redisStatus": {
+"status": "healthy",
+"latency_ms": 1
+},
+"queueDepth": 1103,
+"deadLetterQueueDepth": 0,
+"lastJobAt": "2026-04-21T14:46:21.939Z"
+}
+```
 
 
 ## Blockers and Lessons Learned

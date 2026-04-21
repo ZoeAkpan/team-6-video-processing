@@ -43,7 +43,7 @@ export default function () {
     metadata: { duration: "1" }, 
   });
  
-  const res = http.post(UPLOAD_URL, payload, {
+  const res = http.post(TARGET_URL, payload, {
     headers: { "Content-Type": "application/json" },
     tags:    { endpoint: "upload-async" },
   });
