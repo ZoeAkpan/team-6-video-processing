@@ -29,6 +29,7 @@ The moderation worker handles Redis pub/sub events for video moderation.
 
 GET /videos endpoint is now implemented in catalog-service.
 
+Search index worker has a health check endpoint and can parse video metadata into a search database. It can also handle duplicate videos by updating the existing data without adding another entry. 
 
 ---
 
@@ -41,7 +42,7 @@ GET /videos endpoint is now implemented in catalog-service.
 | Nishil Adina| Fixed issue causing some services to appear as unhealthy,  | |
 | Zoë Akpan      |Implemented idempotency for upload worker. Implemented K6 test for caching. Implemented K6 test for a burst of write requests and testing the async pipeline. Implemented upload service being able to push a job onto the Redis transcode queue. Collectively completed the sprint plan. Completed most of the sprint report. | PR numbers: 30, 27, 26, 23 |
 | [Anne-Colombe Sinkpon]      | Added a GET /health endpoint for thumbnail worker (showing current queue depth, dead letter queue depth, and timestamp of last successfully processed job), made thumbnail worker listen for Redis transcode-complete events, simulated thumbnail extraction, made thumbnail worker write thumbnail references into catalog thumbnail table.  | |
-| [Name]      | | |
+| Gabriella Wang      |Added a health check endpoint for search index worker, implemented search database and adding video metadata entries into the database, implemented idempotency for search index worker. Also updated compose.yml to include search index worker and search db. | `c219f08`, `d9c2113`, `0986218` |
 | [Name]      | | |
 | [Name]      | | |
 | [Name]      | | |
