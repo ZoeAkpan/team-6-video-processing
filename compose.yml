@@ -186,7 +186,7 @@ services:
       PORT: 3003
       DATABASE_URL: postgres://playback:playback@playback-db:5432/playback
       REDIS_URL: redis://redis:6379
-      VIEW_EVENT_CHANNEL: view.started
+      VIEW_EVENT_CHANNEL: view-started
     depends_on:
       playback-db:
         condition: service_healthy
