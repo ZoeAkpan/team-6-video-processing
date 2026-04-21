@@ -46,7 +46,7 @@ async function getHealthSnapshot() {
 
   const healthy = db === 'ok' && redisStatus === 'ok'
 
-  return {
+  const body = {
     healthy,
     body: {
       status: healthy ? 'healthy' : 'unhealthy',
@@ -54,6 +54,13 @@ async function getHealthSnapshot() {
       redis: redisStatus,
     },
   }
+
+  if (redisStatus === "ok") {
+    const lastJobTime = await redis.get("moderation-worker_last_completed_job_time")
+    body.lastJobCompletedAt = lastJobTime ? lastJobTime : "no completed jobs"
+  }
+
+  return body
 }
 
 app.get('/health', async (_req, res) => {
@@ -138,6 +145,9 @@ async function handleTranscodeComplete(rawMessage) {
     )
     console.log(`Published ${VIDEO_REJECTED_EVENT} event`)
   }
+
+  // mark time of last successfully processed job for health endpoint
+  await redis.set("moderation-worker_last_completed_job_time", new Date().toISOString())
 }
 
 async function shutdown(signal) {
