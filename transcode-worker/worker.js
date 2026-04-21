@@ -2,7 +2,8 @@ import redis from 'redis';
 import express from 'express';
 
 const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
-const queueName = 'transcode-jobs';
+const QUEUE_NAME = 'transcode-jobs';
+const DEAD_LETTER_QUEUE_NAME = 'transcode-dead-letter';
 const PORT = Number(process.env.PORT || 3004);
 
 const app = express();
@@ -34,12 +35,29 @@ app.get('/health', async (req, res) => {
         healthy = false;
     }
 
+    let queueDepth = 0;
+    let deadLetterQueueDepth = 0;
+    let lastJobAt = null;
+    
+    // Queue metrics
+    try {
+        queueDepth = await client.lLen(QUEUE_NAME);
+        deadLetterQueueDepth = await client.lLen(DEAD_LETTER_QUEUE_NAME);
+        lastJobAt = await client.get('transcode:lastJobAt');
+    } catch (err) {
+        console.error('Error getting queue metrics:', err.message);
+        healthy = false;
+    }
+
     const body = {
         status: healthy ? 'healthy' : 'unhealthy',
         service: 'transcode-worker',
         timestamp: new Date().toISOString(),
         uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
         redisStatus,
+        queueDepth,
+        deadLetterQueueDepth,
+        lastJobAt,
     };
 
     res.status(healthy ? 200 : 503).json(body);
@@ -90,6 +108,8 @@ async function processJob(job) {
         finishedAt,
     });
 
+    await queueClient.set('transcode:lastJobAt', finishedAt);
+
     await client.publish('transcode-complete', JSON.stringify({
         jobId: job.jobId,
         videoId: job.videoId,
@@ -108,7 +128,7 @@ async function processJob(job) {
 
 async function loop() {
     while (true) {
-        const result = await queueClient.brPop(queueName, 0);
+        const result = await queueClient.brPop(QUEUE_NAME, 0);
         const raw = result?.element;
         if (!raw) continue; // continue if response is null or empty
 
@@ -136,13 +156,13 @@ async function loop() {
             !job.metadata        
         ) {
             console.error('Invalid transcode job payload: missing required fields', job);
-            await queueClient.lPush('transcode-dead-letter', raw); // Push to dead-letter queue
+            await queueClient.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
             continue;
         }
 
         if (!job.metadata.duration) {
             console.error('Invalid transcode job payload: missing duration in metadata', job);
-            await queueClient.lPush('transcode-dead-letter', raw); // Push to dead-letter queue
+            await queueClient.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
             continue;
         }
 
@@ -169,4 +189,9 @@ await queueClient.connect();
 app.listen(PORT, () => {
     console.log(`transcode-worker listening on port ${PORT}`);
 });
-loop();
+
+
+// Async to prevent blocking of healthchecks
+(async () => {
+    await loop();
+})();
