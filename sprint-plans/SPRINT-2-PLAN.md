@@ -30,7 +30,7 @@ Our team will be striving to complete the Redis cache, async pipeline, idempoten
 | Duyen Tran      | `catalog-service` |
 | Zoë Akpan      | `upload/` |
 | Gabriella Wang      | `search-index-worker` |
-| Jihyun Kim      | `quota-service/`, `quota-service/db/`
+| Jihyun Kim      | `quota-service/`, `quota-service/db/` |
 | Jahnavi Sharma      | `catalog-service/` |
 | Robert Winfield    | `transcode-worker/`, `moderation-worker` |
 | Nishil Adina | `playback-service/`, `moderation-worker` | 
