@@ -357,7 +357,8 @@ curl http://localhost:3007/health
 {
   "status": "healthy",
   "db": "ok",
-  "redis": "ok"
+  "redis": "ok",
+  "lastJobCompletedAt": "no completed jobs"
 }
 ```
 
