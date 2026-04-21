@@ -142,7 +142,7 @@ async function handleTranscodeComplete(rawMessage) {
   console.log('Moderation recorded to database', { videoId, status, reason })
 
   if (!approved) {
-    await subscriber.publish(
+    await redis.publish(
       VIDEO_REJECTED_EVENT,
       JSON.stringify({
         videoId,
