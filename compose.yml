@@ -376,7 +376,7 @@ services:
     environment:
       - DATABASE_URL=postgres://user:pass@search-db:5432/search
       - REDIS_URL=redis://redis:6379
-      - TRANSCODE_COMPLETE_CHANNEL=transcode_complete
+      - TRANSCODE_COMPLETE_CHANNEL=transcode-complete
       - PORT=3006
     depends_on:
       search-db:
