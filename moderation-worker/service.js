@@ -21,8 +21,16 @@ const redis = createClient({
   url: REDIS_URL,
 })
 
+const subscriber = createClient({
+  url: REDIS_URL,
+})
+
 redis.on('error', (err) => {
   console.error('Redis error:', err.message)
+})
+
+subscriber.on('error', (err) => {
+  console.error('Redis subscriber error:', err.message)
 })
 
 async function getHealthSnapshot() {
@@ -46,7 +54,7 @@ async function getHealthSnapshot() {
 
   const healthy = db === 'ok' && redisStatus === 'ok'
 
-  return {
+  const response = {
     healthy,
     body: {
       status: healthy ? 'healthy' : 'unhealthy',
@@ -54,6 +62,13 @@ async function getHealthSnapshot() {
       redis: redisStatus,
     },
   }
+
+  if (redisStatus === "ok") {
+    const lastJobTime = await redis.get("moderation-worker_last_completed_job_time")
+    response.body.lastJobCompletedAt = lastJobTime ? lastJobTime : "no completed jobs"
+  }
+
+  return response
 }
 
 app.get('/health', async (_req, res) => {
@@ -127,7 +142,7 @@ async function handleTranscodeComplete(rawMessage) {
   console.log('Moderation recorded to database', { videoId, status, reason })
 
   if (!approved) {
-    await redis.publish(
+    await subscriber.publish(
       VIDEO_REJECTED_EVENT,
       JSON.stringify({
         videoId,
@@ -138,10 +153,21 @@ async function handleTranscodeComplete(rawMessage) {
     )
     console.log(`Published ${VIDEO_REJECTED_EVENT} event`)
   }
+
+  // mark time of last successfully processed job for health endpoint
+  await redis.set("moderation-worker_last_completed_job_time", new Date().toISOString())
 }
 
 async function shutdown(signal) {
   console.log(`Received ${signal}. Shutting down moderation-worker...`)
+
+  try {
+    if (subscriber.isOpen) {
+      await subscriber.quit()
+    }
+  } catch (err) {
+    console.error('Error while closing Redis subscriber:', err.message)
+  }
 
   try {
     if (redis.isOpen) {
@@ -166,9 +192,10 @@ process.on('SIGTERM', () => shutdown('SIGTERM'))
 async function start() {
   try {
     await redis.connect()
+    await subscriber.connect()
     await pool.query('SELECT 1')
 
-    await redis.subscribe(TRANSCODE_COMPLETE_EVENT, async (message) => {
+    await subscriber.subscribe(TRANSCODE_COMPLETE_EVENT, async (message) => {
       try {
         await handleTranscodeComplete(message)
       } catch (err) {
