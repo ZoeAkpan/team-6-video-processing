@@ -9,10 +9,8 @@ const app = express()
 const PORT = Number(process.env.PORT || 3007)
 const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
-const TRANSCODE_COMPLETE_CHANNEL =
-  process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode.complete'
-const VIDEO_REJECTED_CHANNEL =
-  process.env.VIDEO_REJECTED_CHANNEL || 'video.rejected'
+const TRANSCODE_COMPLETE_EVENT = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode-complete'
+const VIDEO_REJECTED_EVENT = process.env.VIDEO_REJECTED_CHANNEL || 'video-rejected'
 const MODERATION_PASS_RATE = Number(process.env.MODERATION_PASS_RATE || 0.8)
 
 const pool = new Pool({
@@ -23,17 +21,17 @@ const redis = createClient({
   url: REDIS_URL,
 })
 
-// const subscriber = createClient({
-//   url: REDIS_URL,
-// })
+const subscriber = createClient({
+  url: REDIS_URL,
+})
 
 redis.on('error', (err) => {
   console.error('Redis error:', err.message)
 })
 
-// subscriber.on('error', (err) => {
-//   console.error('Redis subscriber error:', err.message)
-// })
+subscriber.on('error', (err) => {
+  console.error('Redis subscriber error:', err.message)
+})
 
 async function getHealthSnapshot() {
   let db = 'ok'
@@ -56,7 +54,7 @@ async function getHealthSnapshot() {
 
   const healthy = db === 'ok' && redisStatus === 'ok'
 
-  return {
+  const response = {
     healthy,
     body: {
       status: healthy ? 'healthy' : 'unhealthy',
@@ -64,6 +62,13 @@ async function getHealthSnapshot() {
       redis: redisStatus,
     },
   }
+
+  if (redisStatus === "ok") {
+    const lastJobTime = await redis.get("moderation-worker_last_completed_job_time")
+    response.body.lastJobCompletedAt = lastJobTime ? lastJobTime : "no completed jobs"
+  }
+
+  return response
 }
 
 app.get('/health', async (_req, res) => {
@@ -77,41 +82,43 @@ app.use((_req, res) => {
   })
 })
 
-async function handleTranscodeComplete(rawMessage) {
-  let payload
+function isValidPayload(raw) {
+  // will check for poison pills (malformed data) in sprint 3
+  return true // just return true for now
+}
 
-  try {
-    payload = JSON.parse(rawMessage)
-  } catch (err) {
-    await pool.query(
-      `
-        INSERT INTO moderation_poison_pills (raw_payload, error_message)
-        VALUES ($1, $2)
-      `,
-      [rawMessage, `invalid json: ${err.message}`]
-    )
-    console.error('Inserted poison pill (invalid json)', { rawMessage })
-    return
-  }
-
-  const videoId =
-    typeof payload.videoId === 'string' ? payload.videoId.trim() : ''
-
-  if (!videoId) {
-    await pool.query(
-      `
-        INSERT INTO moderation_poison_pills (raw_payload, error_message)
-        VALUES ($1, $2)
-      `,
-      [rawMessage, 'missing videoId']
-    )
-    console.error('Inserted poison pill (missing videoId)', { rawMessage })
-    return
-  }
-
+function simulateContentReview(videoData) {
   const approved = Math.random() < MODERATION_PASS_RATE
   const status = approved ? 'approved' : 'rejected'
   const reason = approved ? 'passed_automated_review' : 'rejected_automated_review'
+
+  console.log(`Completed content review for video ${videoData.videoId}. Result: ${status}`)
+  
+  return [ approved, status, reason ]
+}
+
+async function handleTranscodeComplete(rawMessage) {
+  console.log(`Received ${TRANSCODE_COMPLETE_EVENT} with payload: ${rawMessage}`)
+
+  if (!isValidPayload(rawMessage)) {
+    // poison pill handling
+    // will be done in sprint 3
+    return
+  }
+
+  const payload = JSON.parse(rawMessage)
+  // expected structure:
+  // {
+  //   jobId,
+  //   videoId,
+  //   status,
+  //   updatedAt,
+  //   outputFormats
+  // }
+
+  const videoId = payload.videoId
+  
+  const [ approved, status, reason ] = simulateContentReview(payload)
 
   await pool.query(
     `
@@ -132,11 +139,11 @@ async function handleTranscodeComplete(rawMessage) {
     [videoId, status, reason, JSON.stringify(payload)]
   )
 
-  console.log('Moderation recorded', { videoId, status, reason })
+  console.log('Moderation recorded to database', { videoId, status, reason })
 
   if (!approved) {
-    await redis.publish(
-      VIDEO_REJECTED_CHANNEL,
+    await subscriber.publish(
+      VIDEO_REJECTED_EVENT,
       JSON.stringify({
         videoId,
         status,
@@ -144,19 +151,23 @@ async function handleTranscodeComplete(rawMessage) {
         moderatedAt: new Date().toISOString(),
       })
     )
+    console.log(`Published ${VIDEO_REJECTED_EVENT} event`)
   }
+
+  // mark time of last successfully processed job for health endpoint
+  await redis.set("moderation-worker_last_completed_job_time", new Date().toISOString())
 }
 
 async function shutdown(signal) {
   console.log(`Received ${signal}. Shutting down moderation-worker...`)
 
-  // try {
-  //   if (subscriber.isOpen) {
-  //     await subscriber.quit()
-  //   }
-  // } catch (err) {
-  //   console.error('Error while closing Redis subscriber:', err.message)
-  // }
+  try {
+    if (subscriber.isOpen) {
+      await subscriber.quit()
+    }
+  } catch (err) {
+    console.error('Error while closing Redis subscriber:', err.message)
+  }
 
   try {
     if (redis.isOpen) {
@@ -181,10 +192,10 @@ process.on('SIGTERM', () => shutdown('SIGTERM'))
 async function start() {
   try {
     await redis.connect()
-    // await subscriber.connect()
+    await subscriber.connect()
     await pool.query('SELECT 1')
 
-    await redis.subscribe(TRANSCODE_COMPLETE_CHANNEL, async (message) => {
+    await subscriber.subscribe(TRANSCODE_COMPLETE_EVENT, async (message) => {
       try {
         await handleTranscodeComplete(message)
       } catch (err) {

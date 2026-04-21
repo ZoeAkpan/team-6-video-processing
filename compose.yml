@@ -141,6 +141,9 @@ services:
       PORT: 3007
       DATABASE_URL: postgres://moderation:moderation@moderation-db:5432/moderation
       REDIS_URL: redis://redis:6379
+      TRANSCODE_COMPLETE_EVENT: transcode-complete
+      VIDEO_REJECTED_EVENT: video-rejected
+      MODERATION_PASS_RATE: 0.8
     depends_on:
       moderation-db:
         condition: service_healthy
@@ -183,10 +186,7 @@ services:
       PORT: 3003
       DATABASE_URL: postgres://playback:playback@playback-db:5432/playback
       REDIS_URL: redis://redis:6379
-      TRANSCODE_COMPLETE_CHANNEL: transcode.complete
-      VIDEO_REJECTED_CHANNEL: video.rejected
-      MODERATION_PASS_RATE: 0.8
-      VIEW_EVENT_CHANNEL: view.started
+      VIEW_EVENT_CHANNEL: view-started
     depends_on:
       playback-db:
         condition: service_healthy
@@ -293,7 +293,7 @@ services:
       PORT: 3005
       THUMBNAIL_QUEUE_NAME: thumbnail-jobs
       THUMBNAIL_DEAD_LETTER_QUEUE_NAME: thumbnail-dead-letter
-      TRANSCODE_COMPLETE_CHANNELS: transcode-complete,transcode.complete
+      TRANSCODE_COMPLETE_CHANNELS: transcode-complete
       THUMBNAIL_PROCESSING_DELAY_MS: 1000
     depends_on:
       catalog-db:
@@ -316,7 +316,7 @@ services:
       POSTGRES_PASSWORD: pass
       POSTGRES_DB: upload_db
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - upload-db-data:/var/lib/postgresql/data
       - ./upload-service/db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
@@ -334,7 +334,7 @@ services:
     container_name: upload-service
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3006:3000"
     networks:
       - team-net
     environment:
