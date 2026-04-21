@@ -9,8 +9,8 @@ const app = express()
 const PORT = Number(process.env.PORT || 3007)
 const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
-const TRANSCODE_COMPLETE_EVENT = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode.complete'
-const VIDEO_REJECTED_EVENT = process.env.VIDEO_REJECTED_CHANNEL || 'video.rejected'
+const TRANSCODE_COMPLETE_EVENT = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode-complete'
+const VIDEO_REJECTED_EVENT = process.env.VIDEO_REJECTED_CHANNEL || 'video-rejected'
 const MODERATION_PASS_RATE = Number(process.env.MODERATION_PASS_RATE || 0.8)
 
 const pool = new Pool({
