@@ -134,6 +134,24 @@ if (!doesntExist){
       ]
     )
 
+    await redis.hSet(`job:${uploadId}`, {
+    status: 'queued',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+    await redis.expire(`job:${uploadId}`, 24 * 60 * 60) // match worker's 1 day TTL
+
+
+    await redis.lPush('transcode-jobs', JSON.stringify({
+    jobId: uploadId,
+    videoId: uploadId, 
+    originalFilename,
+    contentType,
+    fileSizeBytes,
+    uploadedBy,
+    metadata,
+  }))
+
     return res.status(201).json({
       message: 'Upload accepted',
       upload: rows[0],
