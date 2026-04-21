@@ -6,7 +6,7 @@ const pool = new pg.Pool({connectionString: process.env.DATABASE_URL,})
 const app = express()
 const PORT = Number(process.env.PORT || 3006)
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
-const CHANNEL = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode_complete'
+const CHANNEL = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode-complete'
 const redis = createClient({ url: REDIS_URL })
 const subscriber = createClient({ url: REDIS_URL })
 
@@ -43,14 +43,14 @@ async function handleIndexing(payload) {
 
 // How to test locally for now: 
 // send a request: 
-// docker compose exec holmes redis-cli -h redis publish transcode_complete '{"video_id": "v-123", "title": "Inception", "description": "A dream within a dream"}'
+// docker compose exec holmes redis-cli -h redis publish transcode-complete '{"video_id": "v-123", "title": "Inception", "description": "A dream within a dream"}'
 // view table: 
 // docker compose exec search-db psql -U user -d search -c "SELECT * FROM video_search_index;"
 // send another request: 
-// docker compose exec holmes redis-cli -h redis publish transcode_complete '{"video_id": "v-456", "title": "Planet Earth", "description": "A deep dive into the ocean depths."}'
-// docker compose exec holmes redis-cli -h redis publish transcode_complete '{"video_id": "v-789", "title": "Docker for Beginners", "description": "Learn how to containerize your apps."}'
+// docker compose exec holmes redis-cli -h redis publish transcode-complete '{"video_id": "v-456", "title": "Planet Earth", "description": "A deep dive into the ocean depths."}'
+// docker compose exec holmes redis-cli -h redis publish transcode-complete '{"video_id": "v-789", "title": "Docker for Beginners", "description": "Learn how to containerize your apps."}'
 // send same request to test idempotency: 
-// docker compose exec holmes redis-cli -h redis publish transcode_complete '{"video_id": "v-123", "title": "Inception (Extended Cut)", "description": "Now with 20 minutes of extra dreams!"}'
+// docker compose exec holmes redis-cli -h redis publish transcode-complete '{"video_id": "v-123", "title": "Inception (Extended Cut)", "description": "Now with 20 minutes of extra dreams!"}'
 //logs:
 //docker compose logs -f search-index-worker
 
