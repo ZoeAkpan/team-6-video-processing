@@ -310,24 +310,148 @@ curl -X POST http://localhost:3001/quota/check \
 ```
 
 ## playback-service
-
+ 
 ### GET /health
-
-This service provides video playback-related APIs. If not running in compose, the health endpoint may be unreachable during local demos.
-
+ 
+```
+GET /health
+ 
+  Returns the health status of the playback service, PostgreSQL, and Redis.
+ 
+  Responses:
+    200  Service and dependencies healthy
+    503  One or more dependencies unreachable
+```
+ 
 **Example request:**
-
+ 
 ```bash
 curl http://localhost:3003/health
 ```
-
+ 
 **Example response (200):**
-
+ 
 ```json
 {
   "status": "healthy",
   "db": "ok",
   "redis": "ok"
+}
+```
+ 
+**Example response (503):**
+ 
+```json
+{
+  "status": "unhealthy",
+  "db": "ok",
+  "redis": "error: connection refused"
+}
+```
+ 
+---
+ 
+### POST /views
+ 
+```
+POST /views
+ 
+  Records a view event for a user at a given playback position. Duplicate
+  events for the same user and video within a 30-second window are ignored
+  and the existing record is returned. On success, a view event is published
+  to Redis on the view-started channel.
+ 
+  Responses:
+    200  Duplicate event within 30-second window; ignored
+    201  View event recorded
+    400  Missing or invalid request body fields
+    500  Internal error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost:3003/views \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-123",
+    "videoId": "video-456",
+    "positionSeconds": 42
+  }'
+```
+ 
+**Example response (201):**
+ 
+```json
+{
+  "duplicate": false,
+  "ignored": false,
+  "id": "a1b2c3d4-...",
+  "userId": "user-123",
+  "videoId": "video-456",
+  "positionSeconds": 42,
+  "viewedAt": "2026-04-20T12:00:00.000Z"
+}
+```
+ 
+**Example response (200 — duplicate):**
+ 
+```json
+{
+  "duplicate": true,
+  "ignored": true,
+  "userId": "user-123",
+  "videoId": "video-456",
+  "positionSeconds": 42,
+  "viewedAt": "2026-04-20T11:59:45.000Z"
+}
+```
+ 
+---
+ 
+### GET /resume
+ 
+```
+GET /resume
+ 
+  Returns the most recent playback position for a given user and video,
+  allowing clients to resume from where the user left off.
+ 
+  Query parameters:
+    userId   string  required
+    videoId  string  required
+ 
+  Responses:
+    200  Resume position found
+    400  Missing required query parameters
+    404  No view history found for this user and video
+    500  Internal error
+```
+ 
+**Example request:**
+ 
+```bash
+curl "http://localhost:3003/resume?userId=user-123&videoId=video-456"
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "userId": "user-123",
+  "videoId": "video-456",
+  "positionSeconds": 42,
+  "viewedAt": "2026-04-20T12:00:00.000Z"
+}
+```
+ 
+**Example response (404):**
+ 
+```json
+{
+  "error": "resume position not found",
+  "userId": "user-123",
+  "videoId": "video-456"
 }
 ```
 
