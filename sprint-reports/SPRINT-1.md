@@ -60,52 +60,73 @@ Script: `k6/sprint-1.js`
 Target endpoint: `GET /videos` on `catalog-service`  
 Run: `docker compose exec holmes k6 run /workspace/k6/sprint-1.js`
 
-```text
+run /workspace/k6/sprint-1.js
+
          /\      Grafana   /‾‾/  
     /\  /  \     |\  __   /  /   
    /  \/    \    | |/ /  /   ‾‾\ 
   /          \   |   (  |  (‾)  |
  / __________ \  |_|\_\  \_____/ 
- 
-execution: local
-script: /workspace/k6/sprint-1.js
-output: -
 
-scenarios: (100.00%) 1 scenario, 20 max VUs, 1m40s max duration (incl. graceful stop):
-  * default: Up to 20 looping VUs for 1m10s over 3 stages (gracefulRampDown: 30s, gracefulStop: 30s)
 
-THRESHOLDS
+     execution: local
+        script: /workspace/k6/sprint-1.js
+        output: -
 
-errors
-✓ 'rate<0.05' rate=0.00%
+     scenarios: (100.00%) 1 scenario, 20 max VUs, 1m40s max duration (incl. graceful stop):
+              * default: Up to 20 looping VUs for 1m10s over 3 stages (gracefulRampDown: 30s, gracefulStop: 30s)
 
-http_req_failed
-✓ 'rate<0.05' rate=0.00%
 
-TOTAL RESULTS
 
-checks_total.......: 3950    56.174426/s
-checks_succeeded...: 100.00% 3950 out of 3950
-checks_failed......: 0.00%   0 out of 3950
+  █ THRESHOLDS 
 
-✓ status is 200
-✓ body is json-like
+    errors
+    ✓ 'rate<0.05' rate=0.00%
 
-CUSTOM
-errors.........................: 0.00%  0 out of 1975
+    http_req_failed
+    ✓ 'rate<0.05' rate=0.00%
 
-HTTP
-http_req_duration..............: avg=7.76ms   min=461.91µs med=4.21ms   max=169.23ms p(50)=4.21ms   p(95)=27.98ms  p(99)=45.85ms
-http_req_failed................: 0.00%  0 out of 1975
-http_reqs......................: 1975   28.087213/s
-```
+
+  █ TOTAL RESULTS 
+
+    checks_total.......: 3986    56.563454/s
+    checks_succeeded...: 100.00% 3986 out of 3986
+    checks_failed......: 0.00%   0 out of 3986
+
+    ✓ status is 200
+    ✓ body is json-like
+
+    CUSTOM
+    errors.........................: 0.00%  0 out of 1993
+
+    HTTP
+    http_req_duration..............: avg=3.95ms   min=628.41µs med=3.44ms max=48.76ms  p(50)=3.44ms p(95)=7.95ms   p(99)=16.79ms 
+      { expected_response:true }...: avg=3.95ms   min=628.41µs med=3.44ms max=48.76ms  p(50)=3.44ms p(95)=7.95ms   p(99)=16.79ms 
+    http_req_failed................: 0.00%  0 out of 1993
+    http_reqs......................: 1993   28.281727/s
+
+    EXECUTION
+    iteration_duration.............: avg=506.63ms min=500.87ms med=506ms  max=554.25ms p(50)=506ms  p(95)=512.98ms p(99)=519.87ms
+    iterations.....................: 1993   28.281727/s
+    vus............................: 1      min=1         max=20
+    vus_max........................: 20     min=20        max=20
+
+    NETWORK
+    data_received..................: 4.0 MB 56 kB/s
+    data_sent......................: 163 kB 2.3 kB/s
+
+
+
+
+running (1m10.5s), 00/20 VUs, 1993 complete and 0 interrupted iterations
+default ✓ [======================================] 00/20 VUs  1m10s
 
 | Metric             | Value |
 | ------------------ | ----- |
-| p50 response time  | 4.21ms |
-| p95 response time  | 27.98ms |
-| p99 response time  | 45.85ms |
-| Requests/sec (avg) | 28.09 |
+| p50 response time  | 3.44ms |
+| p95 response time  | 7.95ms |
+| p99 response time  | 16.79ms |
+| Requests/sec (avg) | 28.28 |
 | Error rate         | 0.00% |
 
 These numbers are your baseline. Sprint 2 caching should improve them measurably.

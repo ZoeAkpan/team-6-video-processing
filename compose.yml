@@ -135,6 +135,27 @@ services:
     restart: unless-stopped
     ports:
       - "3007:3007"
+    networks:
+      - team-net
+    environment:
+      PORT: 3007
+      DATABASE_URL: postgres://moderation:moderation@moderation-db:5432/moderation
+      REDIS_URL: redis://redis:6379
+      TRANSCODE_COMPLETE_EVENT: transcode-complete
+      VIDEO_REJECTED_EVENT: video-rejected
+      MODERATION_PASS_RATE: 0.8
+    depends_on:
+      moderation-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3007/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   playback-db:
     image: postgres:16
     container_name: playback-db
@@ -163,12 +184,9 @@ services:
       - team-net
     environment:
       PORT: 3003
-      DATABASE_URL: postgres://moderation:moderation@moderation-db:5432/moderation
+      DATABASE_URL: postgres://playback:playback@playback-db:5432/playback
       REDIS_URL: redis://redis:6379
-      TRANSCODE_COMPLETE_CHANNEL: transcode.complete
-      VIDEO_REJECTED_CHANNEL: video.rejected
-      MODERATION_PASS_RATE: 0.8
-      VIEW_EVENT_CHANNEL: view.started
+      VIEW_EVENT_CHANNEL: view-started
     depends_on:
       playback-db:
         condition: service_healthy
@@ -254,6 +272,41 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3004/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  thumbnail-worker:
+    build: ./thumbnail-worker
+    container_name: thumbnail-worker
+    restart: unless-stopped
+    networks:
+      - team-net
+    ports:
+      - "3005:3005"
+    environment:
+      REDIS_URL: redis://redis:6379
+      DATABASE_URL: postgres://catalog:catalog@catalog-db:5432/catalog
+      PORT: 3005
+      THUMBNAIL_QUEUE_NAME: thumbnail-jobs
+      THUMBNAIL_DEAD_LETTER_QUEUE_NAME: thumbnail-dead-letter
+      TRANSCODE_COMPLETE_CHANNELS: transcode-complete
+      THUMBNAIL_PROCESSING_DELAY_MS: 1000
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3005/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
   upload-db:
     image: postgres:16
     container_name: upload-db
@@ -263,7 +316,7 @@ services:
       POSTGRES_PASSWORD: pass
       POSTGRES_DB: upload_db
     ports:
-      - "5433:5432"
+      - "5434:5432"
     volumes:
       - upload-db-data:/var/lib/postgresql/data
       - ./upload-service/db/schema.sql:/docker-entrypoint-initdb.d/001_schema.sql:ro
@@ -347,6 +400,50 @@ services:
       retries: 3
       start_period: 15s
 
+  search-index-worker:
+    build: ./search-index-worker
+    container_name: search-index-worker
+    restart: unless-stopped
+    ports:
+      - "3006:3006"
+    networks:
+      - team-net
+    environment:
+      - DATABASE_URL=postgres://user:pass@search-db:5432/search
+      - REDIS_URL=redis://redis:6379
+      - TRANSCODE_COMPLETE_CHANNEL=transcode-complete
+      - PORT=3006
+    depends_on:
+      search-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3006/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+  
+  search-db:
+    image: postgres:16
+    container_name: search-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: pass
+      POSTGRES_DB: search
+    volumes:
+      - search-db-data:/var/lib/postgresql/data
+      - ./search-index-worker/db/schema.sql:/docker-entrypoint-initdb.d/schema.sql:ro
+    networks:
+      - team-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d search"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
 # ── Named volumes ──────────────────────────────────────────────────────────────
 # Declare a volume for each database here, e.g.:
 #
@@ -359,3 +456,4 @@ volumes:
   moderation-db-data:
   playback-db-data:
   upload-db-data:
+  search-db-data:

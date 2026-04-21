@@ -1,13 +1,14 @@
 {
   "name": "search-index-worker",
   "version": "1.0.0",
-  "description": "Search Index Worker",
   "type": "module",
   "main": "worker.js",
   "scripts": {
     "start": "node worker.js"
   },
   "dependencies": {
+    "express": "^4.19.0",
+    "pg": "^8.11.3",
     "redis": "^5.8.2"
   }
 }

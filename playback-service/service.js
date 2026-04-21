@@ -10,7 +10,7 @@ app.use(express.json())
 const PORT = Number(process.env.PORT || 3003)
 const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
-const VIEW_EVENT_CHANNEL = process.env.VIEW_EVENT_CHANNEL || 'view.started'
+const VIEW_EVENT_CHANNEL = process.env.VIEW_EVENT_CHANNEL || 'view-started'
 
 const pool = new Pool({
   connectionString: DATABASE_URL,

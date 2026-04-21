@@ -83,6 +83,21 @@ app.post('/upload', async (req, res) => {
     })
   }
 
+// checking for duplicates by seeing if an upload key exists in redis for user. if it does not, set it equal to true with expiry date
+const uploadExists = userID => `upload:${userID}`
+
+// generating random id
+const uploadId = crypto.randomUUID()
+const doesntExist = await redis.set(uploadExists(uploadedBy), uploadId, { NX: true, EX: 400 }) 
+
+// if exists
+if (!doesntExist){
+  // 409 represents duplicate conflict
+  const existingRecord = await redis.get(`upload:${uploadedBy}`)
+  const {rows} = await pool.query('SELECT * FROM upload WHERE id = $1', [existingRecord])
+  return res.status(200).json({upload: rows[0], message: 'duplicate upload detected'})
+}
+
   try {
     const quota = await checkQuota(uploadedBy, fileSizeBytes)
 
@@ -96,6 +111,7 @@ app.post('/upload', async (req, res) => {
     const storageKey = `uploads/${Date.now()}-${originalFilename}`
     const { rows } = await pool.query(
       `INSERT INTO upload (
+        id,
         original_filename,
         storage_key,
         content_type,
@@ -104,9 +120,10 @@ app.post('/upload', async (req, res) => {
         status,
         metadata
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       RETURNING *`,
       [
+        uploadId,
         originalFilename,
         storageKey,
         contentType,
@@ -117,6 +134,24 @@ app.post('/upload', async (req, res) => {
       ]
     )
 
+    await redis.hSet(`job:${uploadId}`, {
+    status: 'queued',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  })
+    await redis.expire(`job:${uploadId}`, 24 * 60 * 60) // match worker's 1 day TTL
+
+
+    await redis.lPush('transcode-jobs', JSON.stringify({
+    jobId: uploadId,
+    videoId: uploadId, 
+    originalFilename,
+    contentType,
+    fileSizeBytes,
+    uploadedBy,
+    metadata,
+  }))
+
     return res.status(201).json({
       message: 'Upload accepted',
       upload: rows[0],
@@ -126,6 +161,8 @@ app.post('/upload', async (req, res) => {
     return res.status(err.status ?? 500).json({
       error: err.message ?? 'Upload failed',
     })
+  } finally {
+    await redis.del(uploadExists(uploadedBy))
   }
 })
 
