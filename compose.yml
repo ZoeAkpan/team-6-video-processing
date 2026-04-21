@@ -328,7 +328,7 @@ services:
     container_name: upload-service
     restart: unless-stopped
     ports:
-      - "3006:3000"
+      - "3000:3000"
     networks:
       - team-net
     environment:
