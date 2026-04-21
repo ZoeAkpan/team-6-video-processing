@@ -65,13 +65,9 @@ The transcode now has a health endpoint that provides the health of the containe
 - [ ] Worker `GET /health` returns queue depth, DLQ depth, and last-job-at
 
 
----
-
 
 ## What Is Not Working / Cut
 
-
----
 
 
 ## k6 Results
@@ -172,6 +168,7 @@ default ✓ [======================================] 00/20 VUs  1m10s
 
 Caching reduced p66 by 28%, p95 by 9%, and p50 by 17% just with 5 seeded videos. The difference would likely be even larger with additional videos added to the dataset, as Postgres query time grows with the amount of data. But even with a limited number of videos, there's a clear benefit to caching: better traffic handling.
 ```
+---
 
 ### Test 2: Async Pipeline Burst (`k6/sprint-2-async.js`)
 
@@ -237,21 +234,33 @@ Caching reduced p66 by 28%, p95 by 9%, and p50 by 17% just with 5 seeded videos.
 
 running (1m15.9s), 00/20 VUs, 1870 complete and 0 interrupted iterations
 default ✓ [======================================] 00/20 VUs  1m10s
+
+The transcode-worker is responding quickly, allowing each VU to quickly complete instead of waiting for the video transcoding to finish. The transcode queue depth fluctuates as the worker processes jobs, as indicated by hitting the worker's health endpoint.
 ```
 
 
 Worker health during the burst (hit `/health` while k6 is running):
 
 
-```json
-[Paste an example health response showing non-zero queue depth]
+```bash
+curl http://localhost:3004/health
 ```
 
-
-Idempotency check: [Describe what you sent and what happened when you sent the same idempotency key twice.]
-
-
----
+```json
+{
+"status": "healthy",
+"service": "transcode-worker",
+"timestamp": "2026-04-21T14:46:22.548Z",
+"uptime_seconds": 140,
+"redisStatus": {
+"status": "healthy",
+"latency_ms": 1
+},
+"queueDepth": 1103,
+"deadLetterQueueDepth": 0,
+"lastJobAt": "2026-04-21T14:46:21.939Z"
+}
+```
 
 
 ## Blockers and Lessons Learned
