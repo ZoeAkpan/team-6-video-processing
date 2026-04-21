@@ -41,14 +41,14 @@ The transcode now has a health endpoint that provides the health of the containe
 
 | Team Member | What They Delivered | Key Commits |
 | ----------- | ------------------- | ----------- |
-| Nishil Adina| Fixed issue causing some services to appear as unhealthy,  | |
+| Nishil Adina| Fixed issue causing some services to appear as unhealthy, updated content review process and added logging in moderation-worker, updated moderation-worker health endpoint to show time of last completed job, added README documentation for `POST /views` and `POST /resume` endpoints for playback-service. | 8739ba3, e704399, da0d81e, c6bd269|
 | Zoë Akpan      |Implemented idempotency for upload worker. Implemented K6 test for caching. Implemented K6 test for a burst of write requests and testing the async pipeline. Implemented upload service being able to push a job onto the Redis transcode queue. Collectively completed the sprint plan. Completed most of the sprint report. | PR numbers: 30, 27, 26, 23 |
-| [Anne-Colombe Sinkpon]      | Added a GET /health endpoint for thumbnail worker (showing current queue depth, dead letter queue depth, and timestamp of last successfully processed job), made thumbnail worker listen for Redis transcode-complete events, simulated thumbnail extraction, made thumbnail worker write thumbnail references into catalog thumbnail table.  | |
+| [Anne-Colombe Sinkpon]      | Added a GET /health endpoint for thumbnail worker (showing current queue depth, dead letter queue depth, and timestamp of last successfully processed job), made thumbnail worker listen for Redis transcode-complete events, simulated thumbnail extraction, made thumbnail worker write thumbnail references into catalog thumbnail table.  | `0b3ddb4`, `229ea5b`, `fad4ca2`, `e148d2f`, `f036310`|
 | Gabriella Wang      |Added a health check endpoint for search index worker, implemented search database and adding video metadata entries into the database, implemented idempotency for search index worker. Also updated compose.yml to include search index worker and search db. | `c219f08`, `d9c2113`, `0986218` |
 | Robert Winfield     | Added health check endpoint for transcode-worker that displays critical Redis queue info such as the depth, dead letter queue depth, and the time of the last job processed. Updated compose.yml to include healthcheck for transcode-worker service. | `c57892f`, `469ce37`, `77c6163` |
-| [Name]      | | |
-| [Name]      | | |
-| [Name]      | | |
+| [Duyen Tran]      | Implemented /videos/:id with Redis caching, /video/search which search the title of the video in videos table, also implemented idempotency for catalog-service so no videos would have the same upload_id  |bee51c1, 9dd5c0a, 2cded02, f181a4a  |
+| [Jihyun Kim] | Implemented `quota-service` `GET /health` with Postgres and Redis checks, implemented `POST /quota/check` for synchronous upload validation, added request validation and structured quota logs, and verified valid and invalid quota-check requests with curl. | `1645a7c` |
+| [Jahnavi Sharma]      | Implemented GET /videos browse endpoint with Redis cache support (key: catalog:videos:available, TTL: 60s); added pub/sub subscriber for video.rejected channel to mark rejected videos as unavailable in catalog DB and invalidate cache; added redisSub duplicate client for pub/sub compatibility with redis v4; updated README with caching note for GET /videos. | `5f2985f`, `e13c2ac` |
 | [Name]      | | |
 
 
