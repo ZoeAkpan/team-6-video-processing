@@ -8,7 +8,7 @@
 
 ## Goal
 
-[What reliability improvements and poison pill handling will your team add? Which queues get DLQ handling?]
+Poison pill handling will improve our system by allowing workers to gracefully acknowledge malformed requests while continuing to process proper requests. Malformed requests will be added to a dead letter queue, allowing for us to carefully monitor the system and track malformed data. Multiple queues will get DLQ handling: transcode-worker will look for poison pills on the transcode queue, and workers that monitor the “transcode-complete” Redis pub/sub channel (moderation-worker, thumbnail-worker, search-index-worker) will handle poison pills as well.  
 
 ---
 
@@ -22,7 +22,7 @@
 | [Gabriella Wang]      | `[search-index-worker/]` |
 | [Anne-Colombe Sinkpon]      | `[thumbnail-worker/]` |
 | Zoë Akpan | [`transcode-worker\`, ` upload-service`, `catalog-service` ] |
-| Nishil Adina | `moderation-worker/`, `playback-service/`
+| Nishil Adina | `moderation-worker/`, `playback-service/` |
 | Robert Winfield | `transcode-worker/` |
 ---
 
@@ -75,6 +75,7 @@
 ### [Nishil Adina]
 - [ ] Add poison pill handling to moderation-worker
 - [ ] Add DLQ to moderation-worker
+- [ ] Update moderation-worker /health endpoint to show info about DLQ
 
 ### [Robert Winfield]
 - [ ] Write tests for DLQ in transcode-worker
@@ -85,6 +86,7 @@
 ## Risks
 
 Some of the services depend on other people, so when people don't start working on their part early, this could lead to some delays. Last sprint, we did a better job at distributing the workload, and so this time we are trying to keep that up. Communication is always one of the risks; if someone can’t do their part or struggles to finish up their tasks, they should let the team know. 
+
 ---
 
 ## Definition of Done
