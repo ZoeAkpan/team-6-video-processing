@@ -37,6 +37,11 @@ function normalizeHash(fileHash) {
   return fileHash.trim().toLowerCase()
 }
 
+function uploadHashKey(fileHash) {
+  return `upload:file-hash:${fileHash}`
+}
+
+
 async function enqueueTranscodeJob(upload, metadata) {
   const now = new Date().toISOString()
 
