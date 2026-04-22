@@ -24,6 +24,7 @@ CREATE TABLE IF NOT EXISTS upload (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     original_filename TEXT NOT NULL,
     storage_key TEXT NOT NULL UNIQUE,
+    file_hash TEXT NOT NULL,
     content_type TEXT NOT NULL,
     file_size_bytes BIGINT NOT NULL CHECK (file_size_bytes >= 0),
     uploaded_by TEXT NOT NULL,
@@ -43,6 +44,9 @@ CREATE TABLE IF NOT EXISTS upload (
 CREATE INDEX IF NOT EXISTS idx_uploads_status ON upload (status);
 CREATE INDEX IF NOT EXISTS idx_uploads_created_at ON upload (created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_uploads_uploaded_by ON upload (uploaded_by);
+
+ALTER TABLE upload
+    ADD COLUMN IF NOT EXISTS file_hash TEXT;
 
 DROP TRIGGER IF EXISTS uploads_set_updated_at ON upload;
 CREATE TRIGGER uploads_set_updated_at
