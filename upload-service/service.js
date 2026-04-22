@@ -41,6 +41,32 @@ function uploadHashKey(fileHash) {
   return `upload:file-hash:${fileHash}`
 }
 
+function uploadHashLockKey(fileHash) {
+  return `upload:file-hash:${fileHash}:lock`
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function findUploadById(uploadId) {
+  const { rows } = await pool.query('SELECT * FROM upload WHERE id = $1', [uploadId])
+  return rows[0] ?? null
+}
+
+async function findIdempotentUpload(uploadFileHash) {
+  const uploadId = await redis.get(uploadHashKey(uploadFileHash))
+  if (!uploadId) return null
+
+  const upload = await findUploadById(uploadId)
+  if (upload) return upload
+
+  // If the upload ID is in Redis but not found in the database, 
+  // it means the upload record was likely deleted after the Redis key was set. 
+  // Clean up the Redis key.
+  await redis.del(uploadHashKey(uploadFileHash))
+  return null
+}
 
 async function enqueueTranscodeJob(upload, metadata) {
   const now = new Date().toISOString()
