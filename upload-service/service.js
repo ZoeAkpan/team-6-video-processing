@@ -6,7 +6,7 @@ import { createClient } from 'redis'
 
 const app = express()
 const port = Number(process.env.PORT ?? 3000)
-const quotaServiceUrl = process.env.QUOTA_SERVICE_URL ?? 'http://quota-service:3002'
+const quotaServiceUrl = process.env.QUOTA_SERVICE_URL ?? 'http://quota-service:3001'
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 const redis = createClient({ url: process.env.REDIS_URL })
 await redis.connect()
@@ -14,17 +14,44 @@ await redis.connect()
 const startTime = Date.now()
 app.use(express.json())
 
-async function checkQuota(userId, fileSizeBytes) {
+async function checkQuota(userId, fileSizeBytes, fileHash) {
   const response = await fetch(`${quotaServiceUrl}/quota/check`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, fileSizeBytes }),
+    body: JSON.stringify({ userId, fileSizeBytes, fileHash }),
   })
 
   const payload = await response.json()
 
   if (!response.ok) {
     const error = new Error(payload.error ?? 'quota check failed')
+    error.status = response.status
+    throw error
+  }
+
+  return payload
+}
+
+function getFileHash(body) {
+  const metadata = body?.metadata ?? {}
+  return body?.fileHash ?? metadata.fileHash ?? metadata.file_hash ?? null
+}
+
+function uploadLockKey(userId, fileHash) {
+  return `upload:${userId}:${fileHash}`
+}
+
+async function consumeQuota(userId, fileSizeBytes, fileHash) {
+  const response = await fetch(`${quotaServiceUrl}/quota/consume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, fileSizeBytes, fileHash }),
+  })
+
+  const payload = await response.json()
+
+  if (!response.ok) {
+    const error = new Error(payload.error ?? 'quota consume failed')
     error.status = response.status
     throw error
   }
@@ -77,29 +104,66 @@ app.post('/upload', async (req, res) => {
     metadata = {},
   } = req.body ?? {}
 
-  if (!originalFilename || !contentType || !uploadedBy || typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
+  const fileHash = getFileHash(req.body)
+  const normalizedMetadata = { ...metadata, fileHash, file_hash: fileHash }
+
+  if (!originalFilename || !contentType || !uploadedBy || typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0 || !fileHash) {
     return res.status(400).json({
-      error: 'originalFilename, contentType, uploadedBy, and positive numeric fileSizeBytes are required',
+      error: 'originalFilename, contentType, uploadedBy, fileHash, and positive numeric fileSizeBytes are required',
     })
   }
 
-// checking for duplicates by seeing if an upload key exists in redis for user. if it does not, set it equal to true with expiry date
-const uploadExists = userID => `upload:${userID}`
-
-// generating random id
 const uploadId = crypto.randomUUID()
-const doesntExist = await redis.set(uploadExists(uploadedBy), uploadId, { NX: true, EX: 400 }) 
 
-// if exists
-if (!doesntExist){
-  // 409 represents duplicate conflict
-  const existingRecord = await redis.get(`upload:${uploadedBy}`)
-  const {rows} = await pool.query('SELECT * FROM upload WHERE id = $1', [existingRecord])
-  return res.status(200).json({upload: rows[0], message: 'duplicate upload detected'})
+// 1. persistent duplicate check by fileHash in the database
+const { rows: existingUploads } = await pool.query(
+  `
+  SELECT *
+  FROM upload
+  WHERE uploaded_by = $1
+    AND COALESCE(metadata->>'fileHash', metadata->>'file_hash') = $2
+  LIMIT 1
+  `,
+  [uploadedBy, fileHash]
+)
+
+if (existingUploads.length > 0) {
+  return res.status(200).json({
+    upload: existingUploads[0],
+    message: 'duplicate upload detected',
+  })
+}
+
+// 2. short-lived Redis lock to reduce concurrent duplicate inserts
+const lockKey = uploadLockKey(uploadedBy, fileHash)
+const lockAcquired = await redis.set(lockKey, uploadId, { NX: true, EX: 400 })
+
+if (!lockAcquired) {
+  const { rows } = await pool.query(
+    `
+    SELECT *
+    FROM upload
+    WHERE uploaded_by = $1
+      AND COALESCE(metadata->>'fileHash', metadata->>'file_hash') = $2
+    LIMIT 1
+    `,
+    [uploadedBy, fileHash]
+  )
+
+  if (rows.length > 0) {
+    return res.status(200).json({
+      upload: rows[0],
+      message: 'duplicate upload detected',
+    })
+  }
+
+  return res.status(409).json({
+    error: 'duplicate upload already in progress',
+  })
 }
 
   try {
-    const quota = await checkQuota(uploadedBy, fileSizeBytes)
+    const quota = await checkQuota(uploadedBy, fileSizeBytes, fileHash)
 
     if (!quota.allowed) {
       return res.status(403).json({
@@ -130,9 +194,11 @@ if (!doesntExist){
         fileSizeBytes,
         uploadedBy,
         'pending',
-        JSON.stringify(metadata),
+        JSON.stringify(normalizedMetadata),
       ]
     )
+
+    const quotaConsumption = await consumeQuota(uploadedBy, fileSizeBytes, fileHash)
 
     await redis.hSet(`job:${uploadId}`, {
     status: 'queued',
@@ -156,13 +222,14 @@ if (!doesntExist){
       message: 'Upload accepted',
       upload: rows[0],
       quota,
+      quotaConsumption,
     })
   } catch (err) {
     return res.status(err.status ?? 500).json({
       error: err.message ?? 'Upload failed',
     })
   } finally {
-    await redis.del(uploadExists(uploadedBy))
+    await redis.del(uploadLockKey(uploadedBy, fileHash))
   }
 })
 

@@ -38,3 +38,11 @@ VALUES (
     1073741824
 )
 ON CONFLICT (user_id) DO NOTHING;
+
+CREATE TABLE IF NOT EXISTS quota_consumptions (
+    user_id TEXT NOT NULL,
+    file_hash TEXT NOT NULL,
+    file_size_bytes BIGINT NOT NULL CHECK (file_size_bytes >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    PRIMARY KEY (user_id, file_hash)
+);

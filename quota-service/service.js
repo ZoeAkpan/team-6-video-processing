@@ -220,6 +220,149 @@ app.post('/quota/check', async (req, res) => {
   }
 });
 
+app.post('/quota/consume', async (req, res) => {
+  const client = await pool.connect();
+
+  try {
+    const { userId, fileSizeBytes, fileHash } = req.body;
+
+    const errors = [];
+
+    if (!userId || typeof userId !== 'string' || !userId.trim()) {
+      errors.push('userId is required and must be a non-empty string');
+    }
+
+    if (!Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0) {
+      errors.push('fileSizeBytes is required and must be a positive integer');
+    }
+
+    if (!fileHash || typeof fileHash !== 'string' || !fileHash.trim()) {
+      errors.push('fileHash is required and must be a non-empty string');
+    }
+
+    if (errors.length > 0) {
+      console.log(
+        JSON.stringify({
+          event: 'quota_consume_rejected',
+          reason: 'invalid_request',
+          details: errors,
+          requestBody: req.body,
+          timestamp: new Date().toISOString(),
+        })
+      );
+
+      return res.status(400).json({
+        error: 'invalid_request',
+        details: errors,
+      });
+    }
+
+    await client.query('BEGIN');
+
+    await client.query(
+      `
+      INSERT INTO quotas (
+        user_id,
+        upload_count,
+        upload_limit_count,
+        storage_used_bytes,
+        storage_limit_bytes
+      )
+      VALUES ($1, 0, $2, 0, $3)
+      ON CONFLICT (user_id) DO NOTHING
+      `,
+      [userId, DEFAULT_UPLOAD_LIMIT_COUNT, DEFAULT_STORAGE_LIMIT_BYTES]
+    );
+
+    const insertConsumption = await client.query(
+      `
+      INSERT INTO quota_consumptions (user_id, file_hash, file_size_bytes)
+      VALUES ($1, $2, $3)
+      ON CONFLICT (user_id, file_hash) DO NOTHING
+      RETURNING user_id
+      `,
+      [userId, fileHash, fileSizeBytes]
+    );
+
+    const alreadyConsumed = insertConsumption.rowCount === 0;
+
+    if (!alreadyConsumed) {
+      await client.query(
+        `
+        UPDATE quotas
+        SET
+          upload_count = upload_count + 1,
+          storage_used_bytes = storage_used_bytes + $2
+        WHERE user_id = $1
+        `,
+        [userId, fileSizeBytes]
+      );
+    }
+
+    const result = await client.query(
+      `
+      SELECT
+        user_id,
+        upload_count,
+        upload_limit_count,
+        storage_used_bytes,
+        storage_limit_bytes
+      FROM quotas
+      WHERE user_id = $1
+      `,
+      [userId]
+    );
+
+    await client.query('COMMIT');
+
+    const row = result.rows[0];
+
+    console.log(
+      JSON.stringify({
+        event: 'quota_consumed',
+        userId,
+        fileHash,
+        fileSizeBytes,
+        consumed: !alreadyConsumed,
+        idempotentReplay: alreadyConsumed,
+        uploadCount: Number(row.upload_count),
+        uploadLimitCount: Number(row.upload_limit_count),
+        storageUsedBytes: Number(row.storage_used_bytes),
+        storageLimitBytes: Number(row.storage_limit_bytes),
+        timestamp: new Date().toISOString(),
+      })
+    );
+
+    return res.status(200).json({
+      consumed: !alreadyConsumed,
+      idempotentReplay: alreadyConsumed,
+      userId,
+      fileHash,
+      uploadCount: Number(row.upload_count),
+      uploadLimitCount: Number(row.upload_limit_count),
+      storageUsedBytes: Number(row.storage_used_bytes),
+      storageLimitBytes: Number(row.storage_limit_bytes),
+    });
+  } catch (err) {
+    await client.query('ROLLBACK');
+
+    console.error(
+      JSON.stringify({
+        event: 'quota_consume_error',
+        message: err.message,
+        stack: err.stack,
+        timestamp: new Date().toISOString(),
+      })
+    );
+
+    return res.status(500).json({
+      error: 'internal_server_error',
+    });
+  } finally {
+    client.release();
+  }
+});
+
 app.use((err, _req, res, _next) => {
   console.error(
     JSON.stringify({
