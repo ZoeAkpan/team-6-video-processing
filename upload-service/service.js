@@ -15,11 +15,11 @@ await redis.connect()
 const startTime = Date.now()
 app.use(express.json())
 
-async function checkQuota(userId, fileSizeBytes) {
+async function checkQuota(userId, fileSizeBytes, fileHash) {
   const response = await fetch(`${quotaServiceUrl}/quota/check`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, fileSizeBytes }),
+    body: JSON.stringify({ userId, fileSizeBytes, fileHash }),
   })
 
   const payload = await response.json()
@@ -31,6 +31,10 @@ async function checkQuota(userId, fileSizeBytes) {
   }
 
   return payload
+}
+
+function normalizeHash(fileHash) {
+  return fileHash.trim().toLowerCase()
 }
 
 app.get('/health', async (req, res) => {
