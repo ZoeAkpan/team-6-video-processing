@@ -45,7 +45,12 @@ app.get("/health", async (req, res) => {
 app.get("/videos", async (req, res) => {
   try {
     const cached = await redisClient.get("catalog:videos:available");
-    if (cached) return res.json(JSON.parse(cached));
+    if (cached) {
+      console.log("[cache hit] /videos served from Redis");
+      return res.json(JSON.parse(cached));
+    }
+
+    console.log("[cache miss] /videos querying DB");
     const result = await pool.query(
       `SELECT * FROM video WHERE status = 'available' ORDER BY created_at DESC`
     );
