@@ -37,6 +37,27 @@ function normalizeHash(fileHash) {
   return fileHash.trim().toLowerCase()
 }
 
+async function enqueueTranscodeJob(upload, metadata) {
+  const now = new Date().toISOString()
+
+  await redis.hSet(`job:${upload.id}`, {
+    status: 'queued',
+    createdAt: now,
+    updatedAt: now,
+  })
+  await redis.expire(`job:${upload.id}`, 24 * 60 * 60)
+
+  await redis.lPush('transcode-jobs', JSON.stringify({
+    jobId: upload.id,
+    videoId: upload.id,
+    originalFilename: upload.original_filename,
+    contentType: upload.content_type,
+    fileSizeBytes: Number(upload.file_size_bytes),
+    uploadedBy: upload.uploaded_by,
+    metadata,
+  }))
+} 
+
 app.get('/health', async (req, res) => {
   const checks = {}
   let healthy = true
