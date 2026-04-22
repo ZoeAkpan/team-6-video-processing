@@ -195,12 +195,17 @@ curl http://localhost:3000/health
 ```
 POST /upload
 
-  Sends an upload request to the upload service. The service first makes a
-  synchronous HTTP call to quota-service at POST /quota/check. If the quota
-  check passes, the upload record is inserted into the upload database.
+  Sends an upload request to the upload service. The request must include a
+  `fileHash`. The service first makes a hash-based idempotency check. If the
+  file hash already exists, the existing upload record is returned. Otherwise,
+  it makes a synchronous HTTP call to
+  quota-service at POST /quota/check. If the quota check passes, the upload
+  record is inserted into the upload database and a job is pushed to the Redis
+  transcode queue.
 
   Responses:
     201  Upload accepted and saved
+    200  Matching file hash already exists
     400  Missing or invalid request body fields
     403  Upload blocked by quota service
     500  Internal error
@@ -216,7 +221,8 @@ curl -X POST http://localhost:3000/upload \
     "contentType": "video/mp4",
     "fileSizeBytes": 1000000,
     "uploadedBy": "user-123",
-    "metadata": { "title": "Demo" }
+    "fileHash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    "metadata": { "title": "Demo", "duration": "1" }
   }'
 ```
 
