@@ -67,6 +67,17 @@ async function findIdempotentUpload(uploadFileHash) {
   await redis.del(uploadHashKey(uploadFileHash))
   return null
 }
+// waitForIdempotentUpload polls for an existing upload with the given file hash, 
+// waiting up to ~5 seconds.
+async function waitForIdempotentUpload(uploadFileHash) {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    const upload = await findIdempotentUpload(uploadFileHash)
+    if (upload) return upload
+    await sleep(100)
+  }
+
+  return null
+}
 
 async function enqueueTranscodeJob(upload, metadata) {
   const now = new Date().toISOString()
