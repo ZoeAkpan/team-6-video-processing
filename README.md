@@ -196,9 +196,9 @@ curl http://localhost:3000/health
 POST /upload
 
   Sends an upload request to the upload service. The request must include a
-  `fileHash`. The service first makes a hash-based idempotency check. If the
-  file hash already exists, the existing upload record is returned. Otherwise,
-  it makes a synchronous HTTP call to
+  `fileHash`. The service first makes a Redis-backed idempotency check for that
+  file hash. If the file hash already exists, the existing upload record is
+  returned. Otherwise, it makes a synchronous HTTP call to
   quota-service at POST /quota/check. If the quota check passes, the upload
   record is inserted into the upload database and a job is pushed to the Redis
   transcode queue.
