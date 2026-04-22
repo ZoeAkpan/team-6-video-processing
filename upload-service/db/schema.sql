@@ -48,6 +48,15 @@ CREATE INDEX IF NOT EXISTS idx_uploads_uploaded_by ON upload (uploaded_by);
 ALTER TABLE upload
     ADD COLUMN IF NOT EXISTS file_hash TEXT;
 
+UPDATE upload
+SET file_hash = encode(digest(storage_key, 'sha256'), 'hex')
+WHERE file_hash IS NULL;
+
+ALTER TABLE upload
+    ALTER COLUMN file_hash SET NOT NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_uploads_file_hash_unique ON upload (file_hash);
+
 DROP TRIGGER IF EXISTS uploads_set_updated_at ON upload;
 CREATE TRIGGER uploads_set_updated_at
 BEFORE UPDATE ON upload
