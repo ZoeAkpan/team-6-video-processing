@@ -114,6 +114,12 @@ app.post('/upload', async (req, res) => {
     })
   }
 
+  if (typeof duration !== 'number' || duration <= 0) {
+    return res.status(400).json({
+      error: 'duration must be a positive number',
+    })
+  }
+
   if (typeof fileHash !== 'string' || !fileHash.trim()) {
     return res.status(400).json({
       error: 'fileHash is required and must be a non-empty string',
