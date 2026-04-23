@@ -16,6 +16,7 @@ const redisClient = redis.createClient({
 redisClient.connect().catch(console.error);
 const redisSub = redisClient.duplicate();
 redisSub.connect().catch(console.error);
+const DLQ_KEY = "catalog:dlq";
 
 app.get("/health", async (req, res) => {
   const health = {
