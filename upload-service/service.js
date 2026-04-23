@@ -94,7 +94,9 @@ app.get('/health', async (req, res) => {
 app.post('/upload', async (req, res) => {
 
   const expectedFields = ["originalFilename", "contentType", "fileSizeBytes", "uploadedBy", "fileHash", "duration"]
-  if (!expectedFields.every(field => field in req.body)) {
+  const uploadPayload = req.body
+
+  if (!expectedFields.every(field => field in uploadPayload)) {
     return res.status(400).json({
       error: 'missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration',
     })
@@ -106,8 +108,9 @@ app.post('/upload', async (req, res) => {
     uploadedBy,
     fileHash,
     duration
-  } = req.body
+  } = uploadPayload
 
+  // validate fields
   if (typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
     return res.status(400).json({
       error: 'fileSizeBytes must be a positive number',
@@ -126,74 +129,58 @@ app.post('/upload', async (req, res) => {
     })
   }
 
+  // idempotency check
   try {
-    const existingUpload = await pool.query(
-      'SELECT * FROM upload WHERE file_hash = $1',
-      [fileHash]
-    )
 
-    if (existingUpload.rowCount > 0) {
+    const exists = await redis.get(`upload:${fileHash}`)
+
+    if (exists) { // duplicate upload
       return res.status(200).json({
-        message: 'Upload already exists',
+        message: 'An upload with this file hash already exists',
         fileHash,
-        upload: existingUpload.rows[0],
+        upload: uploadPayload
       })
     }
-
+  
     const quota = await checkQuota(uploadedBy, fileSizeBytes, fileHash)
 
     if (!quota.allowed) {
       return res.status(403).json({
         error: 'Upload blocked by quota service',
         quota,
+        upload: uploadPayload
       })
     }
 
-    const storageKey = `uploads/${Date.now()}-${originalFilename}`
-    const { rows } = await pool.query(
+    await pool.query(
       `INSERT INTO upload (
         original_filename,
-        storage_key,
-        file_hash,
         content_type,
         file_size_bytes,
         uploaded_by,
-        status,
-        metadata
+        file_hash,
+        duration
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      ON CONFLICT (file_hash) DO NOTHING
-      RETURNING *`,
+      VALUES ($1, $2, $3, $4, $5, $6)`,
       [
         originalFilename,
-        storageKey,
-        fileHash,
         contentType,
         fileSizeBytes,
         uploadedBy,
-        'pending',
-        JSON.stringify(metadata),
+        fileHash,
+        duration
       ]
     )
 
-    if (rows.length === 0) {
-      const duplicate = await pool.query(
-        'SELECT * FROM upload WHERE file_hash = $1',
-        [fileHash]
-      )
+    await redis.set(`upload:${fileHash}`, "1")
+    const quotaConsumption = await consumeQuota(uploadedBy, fileSizeBytes, fileHash)
 
-      return res.status(200).json({
-        message: 'Upload already exists',
-        upload: duplicate.rows[0],
-        idempotent: true,
-      })
-    }
-
-    await enqueueTranscodeJob(req.body)
+    await enqueueTranscodeJob(uploadPayload)
+    
 
     return res.status(201).json({
       message: 'Upload accepted',
-      upload: rows[0],
+      upload: uploadPayload,
       quota,
       quotaConsumption,
     })
