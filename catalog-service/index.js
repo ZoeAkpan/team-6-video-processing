@@ -114,7 +114,7 @@ app.get("/video/:id", async (req, res) => {
   const {id} = req.params;
 
   try {
-    const cached = await redisClient.get(`video: ${id}`);
+    const cached = await redisClient.get(`video:${id}`);
     if (cached) {
       return res.json(JSON.parse(cached));
     }
