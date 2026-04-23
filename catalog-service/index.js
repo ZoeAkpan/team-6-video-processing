@@ -39,6 +39,11 @@ app.get("/health", async (req, res) => {
     health.redis = "error: " + err.message;
   }
 
+  try {
+    health.dlq_depth = await redisClient.lLen(DLQ_KEY);
+  } catch (err) {
+    health.dlq_depth = -1;
+  }
   const statusCode = health.status === "healthy" ? 200 : 503;
   res.status(statusCode).json(health);
 });
