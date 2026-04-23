@@ -37,16 +37,8 @@ function normalizeHash(fileHash) {
   return fileHash.trim().toLowerCase()
 }
 
-function uploadHashKey(fileHash) {
+function uploadIdByFileHashKey(fileHash) {
   return `upload:file-hash:${fileHash}`
-}
-
-function uploadHashLockKey(fileHash) {
-  return `upload:file-hash:${fileHash}:lock`
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 async function findUploadById(uploadId) {
@@ -55,7 +47,8 @@ async function findUploadById(uploadId) {
 }
 
 async function findIdempotentUpload(uploadFileHash) {
-  const uploadId = await redis.get(uploadHashKey(uploadFileHash))
+  // Redis stores the idempotency mapping from file hash to upload record ID.
+  const uploadId = await redis.get(uploadIdByFileHashKey(uploadFileHash))
   if (!uploadId) return null
 
   const upload = await findUploadById(uploadId)
@@ -64,18 +57,7 @@ async function findIdempotentUpload(uploadFileHash) {
   // If the upload ID is in Redis but not found in the database, 
   // it means the upload record was likely deleted after the Redis key was set. 
   // Clean up the Redis key.
-  await redis.del(uploadHashKey(uploadFileHash))
-  return null
-}
-// waitForIdempotentUpload polls for an existing upload with the given file hash, 
-// waiting up to ~5 seconds.
-async function waitForIdempotentUpload(uploadFileHash) {
-  for (let attempt = 0; attempt < 50; attempt += 1) {
-    const upload = await findIdempotentUpload(uploadFileHash)
-    if (upload) return upload
-    await sleep(100)
-  }
-
+  await redis.del(uploadIdByFileHashKey(uploadFileHash))
   return null
 }
 
@@ -161,15 +143,12 @@ app.post('/upload', async (req, res) => {
   const uploadFileHash = normalizeHash(fileHash)
 
   try {
-    const existingUpload = await pool.query(
-      'SELECT * FROM upload WHERE file_hash = $1',
-      [uploadFileHash]
-    )
+    const existingUpload = await findIdempotentUpload(uploadFileHash)
 
-    if (existingUpload.rowCount > 0) {
+    if (existingUpload) {
       return res.status(200).json({
         message: 'Upload already exists',
-        upload: existingUpload.rows[0],
+        upload: existingUpload,
         idempotent: true,
       })
     }
@@ -198,7 +177,6 @@ app.post('/upload', async (req, res) => {
         metadata
       )
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (file_hash) DO NOTHING
       RETURNING *`,
       [
         uploadId,
@@ -213,19 +191,7 @@ app.post('/upload', async (req, res) => {
       ]
     )
 
-    if (rows.length === 0) {
-      const duplicate = await pool.query(
-        'SELECT * FROM upload WHERE file_hash = $1',
-        [uploadFileHash]
-      )
-
-      return res.status(200).json({
-        message: 'Upload already exists',
-        upload: duplicate.rows[0],
-        idempotent: true,
-      })
-    }
-
+    await redis.set(uploadIdByFileHashKey(uploadFileHash), rows[0].id)
     await enqueueTranscodeJob(rows[0], metadata)
 
     return res.status(201).json({
