@@ -125,12 +125,12 @@ app.post('/upload', async (req, res) => {
     fileSizeBytes,
     uploadedBy,
     fileHash,
-    metadata = {},
+    metadata = { duration: null},
   } = req.body ?? {}
 
-  if (!originalFilename || !contentType || !uploadedBy || typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
+  if (!originalFilename || !contentType || !uploadedBy || typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0 || !metadata.duration) {
     return res.status(400).json({
-      error: 'originalFilename, contentType, uploadedBy, and positive numeric fileSizeBytes are required',
+      error: 'originalFilename, contentType, uploadedBy, fileSizeBytes, and duration are required',
     })
   }
 
