@@ -189,7 +189,7 @@ app.post('/upload', async (req, res) => {
       })
     }
 
-    await enqueueTranscodeJob(rows[0], metadata)
+    await enqueueTranscodeJob(req.body)
 
     return res.status(201).json({
       message: 'Upload accepted',
