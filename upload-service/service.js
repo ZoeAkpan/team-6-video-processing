@@ -1,7 +1,6 @@
 // code from health endpoint section 
 
 import express from 'express'
-import crypto from 'node:crypto'
 import pg from 'pg'
 import { createClient } from 'redis'
 
@@ -117,7 +116,7 @@ app.post('/upload', async (req, res) => {
     fileHash,
     duration
   }
-  
+
   // validate fields
   if (typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
     return res.status(400).json({
