@@ -83,16 +83,27 @@ app.get("/video/search", async (req,res) => {
     res.status(500).json({ error: err.message});
   }
 })
-redisSub.subscribe("video.rejected", async (message) => {
+async function handleRejection(message, attempt = 1) {
   try {
-    const { video_id } = JSON.parse(message);
+    const parsed = JSON.parse(message);
+    const { video_id } = parsed;
+    if (!video_id) throw new Error("missing video_id");
     await pool.query(`UPDATE video SET status = 'unavailable' WHERE id = $1`, [video_id]);
     await redisClient.del("catalog:videos:available");
     console.log(`[moderation-sub] marked video ${video_id} as unavailable`);
   } catch (err) {
-    console.error("[moderation-sub] error:", err.message);
+    if (attempt < 3) {
+      const delay = Math.pow(2, attempt) * 100;
+      console.warn(`[moderation-sub] retry ${attempt}/3 in ${delay}ms — ${err.message}`);
+      await new Promise((r) => setTimeout(r, delay));
+      return handleRejection(message, attempt + 1);
+    }
+    console.error(`[moderation-sub] sending to DLQ after 3 attempts — ${err.message}`);
+    await redisClient.lPush(DLQ_KEY, JSON.stringify({ message, error: err.message, at: new Date().toISOString() }));
   }
-});
+}
+
+redisSub.subscribe("video.rejected", (message) => handleRejection(message));
 
 app.get("/video/:id", async (req, res) => {
   const {id} = req.params;
