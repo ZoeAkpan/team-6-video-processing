@@ -93,10 +93,10 @@ app.get('/health', async (req, res) => {
 
 app.post('/upload', async (req, res) => {
 
-  const expectedFields = ["originalFilename", "contentType", "fileSizeBytes", "uploadedBy", "fileHash", "metadata"]
+  const expectedFields = ["originalFilename", "contentType", "fileSizeBytes", "uploadedBy", "fileHash", "duration"]
   if (!expectedFields.every(field => field in req.body)) {
     return res.status(400).json({
-      error: 'missing fields from request body: originalFilename, contentType, uploadedBy, fileHash, metadata, and positive numeric fileSizeBytes are required',
+      error: 'missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration',
     })
   }
   const {
@@ -105,8 +105,8 @@ app.post('/upload', async (req, res) => {
     fileSizeBytes,
     uploadedBy,
     fileHash,
-    metadata = {},
-  } = req.body ?? {}
+    duration
+  } = req.body
 
   if (typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
     return res.status(400).json({
