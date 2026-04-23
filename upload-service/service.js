@@ -51,25 +51,8 @@ async function consumeQuota(userId, fileSizeBytes, fileHash) {
   return payload
 }
 
-async function enqueueTranscodeJob(upload, metadata) {
-  const now = new Date().toISOString()
-
-  await redis.hSet(`job:${upload.id}`, {
-    status: 'queued',
-    createdAt: now,
-    updatedAt: now,
-  })
-  await redis.expire(`job:${upload.id}`, 24 * 60 * 60)
-
-  await redis.lPush('transcode-jobs', JSON.stringify({
-    jobId: upload.id,
-    videoId: upload.id,
-    originalFilename: upload.original_filename,
-    contentType: upload.content_type,
-    fileSizeBytes: Number(upload.file_size_bytes),
-    uploadedBy: upload.uploaded_by,
-    metadata,
-  }))
+async function enqueueTranscodeJob(uploadPayload) {
+  await redis.lPush('transcode-jobs', JSON.stringify(uploadPayload))
 } 
 
 app.get('/health', async (req, res) => {
@@ -161,10 +144,8 @@ app.post('/upload', async (req, res) => {
     }
 
     const storageKey = `uploads/${Date.now()}-${originalFilename}`
-    const uploadId = crypto.randomUUID()
     const { rows } = await pool.query(
       `INSERT INTO upload (
-        id,
         original_filename,
         storage_key,
         file_hash,
@@ -174,11 +155,10 @@ app.post('/upload', async (req, res) => {
         status,
         metadata
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
       ON CONFLICT (file_hash) DO NOTHING
       RETURNING *`,
       [
-        uploadId,
         originalFilename,
         storageKey,
         fileHash,
