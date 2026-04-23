@@ -1,12 +1,13 @@
 // code from health endpoint section 
 
 import express from 'express'
+import crypto from 'node:crypto'
 import pg from 'pg'
 import { createClient } from 'redis'
 
 const app = express()
 const port = Number(process.env.PORT ?? 3000)
-const quotaServiceUrl = process.env.QUOTA_SERVICE_URL ?? 'http://quota-service:3002'
+const quotaServiceUrl = process.env.QUOTA_SERVICE_URL ?? 'http://quota-service:3001'
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 const redis = createClient({ url: process.env.REDIS_URL })
 await redis.connect()
@@ -14,11 +15,11 @@ await redis.connect()
 const startTime = Date.now()
 app.use(express.json())
 
-async function checkQuota(userId, fileSizeBytes) {
+async function checkQuota(userId, fileSizeBytes, fileHash) {
   const response = await fetch(`${quotaServiceUrl}/quota/check`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, fileSizeBytes }),
+    body: JSON.stringify({ userId, fileSizeBytes, fileHash }),
   })
 
   const payload = await response.json()
@@ -31,6 +32,31 @@ async function checkQuota(userId, fileSizeBytes) {
 
   return payload
 }
+
+function normalizeHash(fileHash) {
+  return fileHash.trim().toLowerCase()
+}
+
+async function enqueueTranscodeJob(upload, metadata) {
+  const now = new Date().toISOString()
+
+  await redis.hSet(`job:${upload.id}`, {
+    status: 'queued',
+    createdAt: now,
+    updatedAt: now,
+  })
+  await redis.expire(`job:${upload.id}`, 24 * 60 * 60)
+
+  await redis.lPush('transcode-jobs', JSON.stringify({
+    jobId: upload.id,
+    videoId: upload.id,
+    originalFilename: upload.original_filename,
+    contentType: upload.content_type,
+    fileSizeBytes: Number(upload.file_size_bytes),
+    uploadedBy: upload.uploaded_by,
+    metadata,
+  }))
+} 
 
 app.get('/health', async (req, res) => {
   const checks = {}
@@ -74,6 +100,7 @@ app.post('/upload', async (req, res) => {
     contentType,
     fileSizeBytes,
     uploadedBy,
+    fileHash,
     metadata = {},
   } = req.body ?? {}
 
@@ -83,23 +110,29 @@ app.post('/upload', async (req, res) => {
     })
   }
 
-// checking for duplicates by seeing if an upload key exists in redis for user. if it does not, set it equal to true with expiry date
-const uploadExists = userID => `upload:${userID}`
+  if (typeof fileHash !== 'string' || !fileHash.trim()) {
+    return res.status(400).json({
+      error: 'fileHash is required and must be a non-empty string',
+    })
+  }
 
-// generating random id
-const uploadId = crypto.randomUUID()
-const doesntExist = await redis.set(uploadExists(uploadedBy), uploadId, { NX: true, EX: 400 }) 
-
-// if exists
-if (!doesntExist){
-  // 409 represents duplicate conflict
-  const existingRecord = await redis.get(`upload:${uploadedBy}`)
-  const {rows} = await pool.query('SELECT * FROM upload WHERE id = $1', [existingRecord])
-  return res.status(200).json({upload: rows[0], message: 'duplicate upload detected'})
-}
+  const uploadFileHash = normalizeHash(fileHash)
 
   try {
-    const quota = await checkQuota(uploadedBy, fileSizeBytes)
+    const existingUpload = await pool.query(
+      'SELECT * FROM upload WHERE file_hash = $1',
+      [uploadFileHash]
+    )
+
+    if (existingUpload.rowCount > 0) {
+      return res.status(200).json({
+        message: 'Upload already exists',
+        upload: existingUpload.rows[0],
+        idempotent: true,
+      })
+    }
+
+    const quota = await checkQuota(uploadedBy, fileSizeBytes, uploadFileHash)
 
     if (!quota.allowed) {
       return res.status(403).json({
@@ -109,23 +142,27 @@ if (!doesntExist){
     }
 
     const storageKey = `uploads/${Date.now()}-${originalFilename}`
+    const uploadId = crypto.randomUUID()
     const { rows } = await pool.query(
       `INSERT INTO upload (
         id,
         original_filename,
         storage_key,
+        file_hash,
         content_type,
         file_size_bytes,
         uploaded_by,
         status,
         metadata
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      ON CONFLICT (file_hash) DO NOTHING
       RETURNING *`,
       [
         uploadId,
         originalFilename,
         storageKey,
+        uploadFileHash,
         contentType,
         fileSizeBytes,
         uploadedBy,
@@ -134,23 +171,20 @@ if (!doesntExist){
       ]
     )
 
-    await redis.hSet(`job:${uploadId}`, {
-    status: 'queued',
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  })
-    await redis.expire(`job:${uploadId}`, 24 * 60 * 60) // match worker's 1 day TTL
+    if (rows.length === 0) {
+      const duplicate = await pool.query(
+        'SELECT * FROM upload WHERE file_hash = $1',
+        [uploadFileHash]
+      )
 
+      return res.status(200).json({
+        message: 'Upload already exists',
+        upload: duplicate.rows[0],
+        idempotent: true,
+      })
+    }
 
-    await redis.lPush('transcode-jobs', JSON.stringify({
-    jobId: uploadId,
-    videoId: uploadId, 
-    originalFilename,
-    contentType,
-    fileSizeBytes,
-    uploadedBy,
-    metadata,
-  }))
+    await enqueueTranscodeJob(rows[0], metadata)
 
     return res.status(201).json({
       message: 'Upload accepted',
@@ -161,8 +195,6 @@ if (!doesntExist){
     return res.status(err.status ?? 500).json({
       error: err.message ?? 'Upload failed',
     })
-  } finally {
-    await redis.del(uploadExists(uploadedBy))
   }
 })
 
