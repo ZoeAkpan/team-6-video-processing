@@ -52,8 +52,13 @@ app.get("/videos", async (req, res) => {
   try {
     const cached = await redisClient.get("catalog:videos:available");
     if (cached) {
-      console.log("[cache hit] /videos served from Redis");
-      return res.json(JSON.parse(cached));
+      try {
+        console.log("[cache hit] /videos served from Redis");
+        return res.json(JSON.parse(cached));
+      } catch (e) {
+        console.warn("[cache] corrupted JSON in catalog:videos:available, deleting");
+        await redisClient.del("catalog:videos:available");
+      }
     }
 
     console.log("[cache miss] /videos querying DB");
