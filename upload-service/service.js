@@ -33,8 +33,22 @@ async function checkQuota(userId, fileSizeBytes, fileHash) {
   return payload
 }
 
-function normalizeHash(fileHash) {
-  return fileHash.trim().toLowerCase()
+async function consumeQuota(userId, fileSizeBytes, fileHash) {
+  const response = await fetch(`${quotaServiceUrl}/quota/consume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, fileSizeBytes, fileHash }),
+  })
+
+  const payload = await response.json()
+
+  if (!response.ok) {
+    const error = new Error(payload.error ?? 'quota consume failed')
+    error.status = response.status
+    throw error
+  }
+
+  return payload
 }
 
 async function enqueueTranscodeJob(upload, metadata) {
@@ -95,6 +109,13 @@ app.get('/health', async (req, res) => {
 })
 
 app.post('/upload', async (req, res) => {
+
+  const expectedFields = ["originalFilename", "contentType", "fileSizeBytes", "uploadedBy", "fileHash", "metadata"]
+  if (!expectedFields.every(field => field in req.body)) {
+    return res.status(400).json({
+      error: 'missing fields from request body: originalFilename, contentType, uploadedBy, fileHash, metadata, and positive numeric fileSizeBytes are required',
+    })
+  }
   const {
     originalFilename,
     contentType,
@@ -104,12 +125,9 @@ app.post('/upload', async (req, res) => {
     metadata = {},
   } = req.body ?? {}
 
-  const fileHash = getFileHash(req.body)
-  const normalizedMetadata = { ...metadata, fileHash, file_hash: fileHash }
-
-  if (!originalFilename || !contentType || !uploadedBy || typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0 || !fileHash) {
+  if (typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
     return res.status(400).json({
-      error: 'originalFilename, contentType, uploadedBy, fileHash, and positive numeric fileSizeBytes are required',
+      error: 'fileSizeBytes must be a positive number',
     })
   }
 
@@ -119,23 +137,21 @@ app.post('/upload', async (req, res) => {
     })
   }
 
-  const uploadFileHash = normalizeHash(fileHash)
-
   try {
     const existingUpload = await pool.query(
       'SELECT * FROM upload WHERE file_hash = $1',
-      [uploadFileHash]
+      [fileHash]
     )
 
     if (existingUpload.rowCount > 0) {
       return res.status(200).json({
         message: 'Upload already exists',
+        fileHash,
         upload: existingUpload.rows[0],
-        idempotent: true,
       })
     }
 
-    const quota = await checkQuota(uploadedBy, fileSizeBytes, uploadFileHash)
+    const quota = await checkQuota(uploadedBy, fileSizeBytes, fileHash)
 
     if (!quota.allowed) {
       return res.status(403).json({
@@ -165,19 +181,19 @@ app.post('/upload', async (req, res) => {
         uploadId,
         originalFilename,
         storageKey,
-        uploadFileHash,
+        fileHash,
         contentType,
         fileSizeBytes,
         uploadedBy,
         'pending',
-        JSON.stringify(normalizedMetadata),
+        JSON.stringify(metadata),
       ]
     )
 
     if (rows.length === 0) {
       const duplicate = await pool.query(
         'SELECT * FROM upload WHERE file_hash = $1',
-        [uploadFileHash]
+        [fileHash]
       )
 
       return res.status(200).json({
