@@ -16,12 +16,60 @@ const redisClient = redis.createClient({
 redisClient.connect().catch(console.error);
 const redisSub = redisClient.duplicate();
 redisSub.connect().catch(console.error);
+const DLQ_KEY = "catalog:dlq";
+const subscriber = redisClient.duplicate();
+subscriber.connect().catch(console.error);
+
+subscriber.subscribe("transcode_complete", async (message) => {console.log("[transcode_complete] received message:", message);
+  let data;
+  try{
+    data = JSON.parse(message);
+  } catch (err) {
+    console.error("[poison pill] invalid, moving to DLQ", message);
+    await redisClient.lPush(DLQ_KEY, message);
+    return;
+  }
+  if (!data.fileHash || !data.resolution) {
+    console.error("[poison pill] missing required fields, moving to DLQ:", message);
+    await redisClient.lPush(DLQ_KEY, message);
+    return;
+  }
+  
+  try{
+    const video = await pool.query(
+      `SELECT id FROM video WHERE fileHash = $1`,
+      [data.fileHash]
+    );
+    if (video.rows.length === 0) {
+      console.error("[poison pill] video not found for fileHash:", data.fileHash, "moving to DLQ");
+      await redisClient.lPush(DLQ_KEY, message);
+      return;
+    }
+    const videoId = video.rows[0].id;
+    await pool.query(
+      `INSERT INTO transcode_output (video_id, resolution) VALUES ($1, $2) ON CONFLICT (video_id, resolution) DO NOTHING`,
+      [videoId, data.resolution]
+    );
+    await pool.query(
+      `UPDATE video SET status = 'available' WHERE id = $1`,
+      [videoId]
+    );
+    await redisClient.del("catalog:videos:available");
+    await redisClient.set("catalog:last_processed_at", new Date().toISOString());
+    console.log("[transcode_complete] video", videoId, "status updated to available");
+  } catch (err) {
+    console.error("[poison pill] DB error, moving to DLQ:", err.message);
+    await redisClient.lPush(DLQ_KEY, message);
+  }
+});
 
 app.get("/health", async (req, res) => {
   const health = {
     status: "healthy",
     db: "ok",
     redis: "ok",
+    dlq_depth: 0,
+    last_processed_at: null,
   };
 
   try {
@@ -33,6 +81,9 @@ app.get("/health", async (req, res) => {
 
   try {
     await redisClient.ping();
+    health.dlq_depth = await redisClient.lLen(DLQ_KEY);
+    const last = await redisClient.get("catalog: last_procesed_at");
+    health.last_processed_at = lat || null;
   } catch (err) {
     health.status = "unhealthy";
     health.redis = "error: " + err.message;
@@ -94,9 +145,11 @@ app.get("/video/:id", async (req, res) => {
   try {
     const cached = await redisClient.get(`video: ${id}`);
     if (cached) {
+      console.log(`[cache hit] /videos/${id} served from Redis`);
       return res.json(JSON.parse(cached));
     }
 
+    console.log(`[cache miss] /videos/${id} querying DB`);
     const result = await pool.query(
       `SELECT * FROM video WHERE id = $1 AND status = 'available'`, [id]
     )
