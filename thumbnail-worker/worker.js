@@ -5,7 +5,6 @@ import { createClient } from 'redis'
 const { Pool } = pg
 const app = express()
 
-
 const PORT = Number(process.env.PORT || 3005)
 const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
@@ -28,6 +27,10 @@ const TRANSCODE_COMPLETE_CHANNELS = (
 
 const PROCESSING_DELAY_MS = Number(process.env.THUMBNAIL_PROCESSING_DELAY_MS || 250)
 const CATALOG_CACHE_KEY = process.env.CATALOG_CACHE_KEY || 'catalog:videos:available'
+const MAX_DB_RETRY_ATTEMPTS = Number(process.env.THUMBNAIL_DB_RETRY_ATTEMPTS || 3)
+const DB_RETRY_BASE_DELAY_MS = Number(
+  process.env.THUMBNAIL_DB_RETRY_BASE_DELAY_MS || 500
+)
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
