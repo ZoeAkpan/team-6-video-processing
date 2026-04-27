@@ -184,6 +184,11 @@ function burnCpu(ms) {
   return x
 }
 
+function withJitter(baseMs, fractionOfBase = 0.2) {
+  const variance = baseMs * fractionOfBase
+  return Math.max(1, baseMs + (Math.random() * 2 - 1) * variance)
+}
+
 function isTransientDatabaseError(err) {
   const transientCodes = new Set([
     '40001', // serialization_failure
@@ -285,10 +290,11 @@ async function processTranscodeComplete(event) {
 
   // Thumbnail extraction is CPU-bound, so burn CPU instead of sleeping.
   if (PROCESSING_DELAY_MS > 0) {
+    const processingMs = withJitter(PROCESSING_DELAY_MS)
     console.log(
-      `thumbnail extracting simulated cpu job=${event.jobId} cpuMs=${PROCESSING_DELAY_MS}`
+      `thumbnail extracting simulated cpu job=${event.jobId} baseCpuMs=${PROCESSING_DELAY_MS} actualCpuMs=${Math.round(processingMs)}`
     )
-    const cpuResult = burnCpu(PROCESSING_DELAY_MS)
+    const cpuResult = burnCpu(processingMs)
     if (!Number.isFinite(cpuResult)) {
       console.warn(`thumbnail cpu simulation produced invalid result job=${event.jobId}`)
     }
