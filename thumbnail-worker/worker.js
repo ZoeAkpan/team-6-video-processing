@@ -43,6 +43,13 @@ let lastSuccessfullyProcessedJobAt = null
 let inFlightJobId = null
 let shuttingDown = false
 
+class PoisonPillError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'PoisonPillError'
+  }
+}
+
 redis.on('error', (err) => {
   console.error('Thumbnail worker Redis error:', err.message)
 })
