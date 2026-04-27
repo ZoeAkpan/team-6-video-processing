@@ -157,6 +157,40 @@ function parseTranscodeComplete(raw) {
   return event
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function isTransientDatabaseError(err) {
+  const transientCodes = new Set([
+    '40001', // serialization_failure
+    '40P01', // deadlock_detected
+    '53300', // too_many_connections
+    '53400', // configuration_limit_exceeded
+    '57P01', // admin_shutdown
+    '57P02', // crash_shutdown
+    '57P03', // cannot_connect_now
+    '58000', // system_error
+    '58030', // io_error
+  ])
+
+  return (
+    err?.code?.startsWith?.('08') ||
+    transientCodes.has(err?.code) ||
+    ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EPIPE'].includes(
+      err?.code
+    )
+  )
+}
+
+async function ensureVideoExists(videoId) {
+  const result = await pool.query('SELECT 1 FROM video WHERE id = $1', [videoId])
+
+  if (result.rowCount === 0) {
+    throw new PoisonPillError(`video does not exist: ${videoId}`)
+  }
+}
+
 // figure out the video duration 
 function getDurationSeconds(event) {
   const rawDuration = event.metadata?.duration ?? event.durationSeconds ?? 30
