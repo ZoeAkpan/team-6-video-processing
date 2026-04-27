@@ -159,15 +159,17 @@ curl http://localhost:3002/videos
 
 ### GET /health
 
-```
-GET /health
+**Method and path:** `GET /health`
 
-  Returns the health status of the upload service, PostgreSQL, and Redis.
+**Description:** Returns the health status of the upload service, PostgreSQL,
+and Redis.
 
-  Responses:
-    200  Service and dependencies healthy
-    503  One or more dependencies unreachable
-```
+**Responses:**
+
+| Status | Meaning |
+| ------ | ------- |
+| 200 | Service and dependencies healthy |
+| 503 | One or more dependencies unreachable |
 
 **Example request:**
 
@@ -181,9 +183,11 @@ curl http://localhost:3000/health
 {
   "status": "healthy",
   "service": "upload-service",
+  "timestamp": "2026-04-27T18:21:00.000Z",
+  "uptime_seconds": 42,
   "checks": {
-    "database": { "status": "healthy" },
-    "redis": { "status": "healthy" }
+    "database": { "status": "healthy", "latency_ms": 2 },
+    "redis": { "status": "healthy", "latency_ms": 1 }
   }
 }
 ```
@@ -192,24 +196,34 @@ curl http://localhost:3000/health
 
 ### POST /upload
 
-```
-POST /upload
+**Method and path:** `POST /upload`
 
-  Sends an upload request to the upload service. The request must include a
-  `fileHash`. The service first makes a hash-based idempotency check. If the
-  file hash already exists, the existing upload record is returned. Otherwise,
-  it makes a synchronous HTTP call to
-  quota-service at POST /quota/check. If the quota check passes, the upload
-  record is inserted into the upload database and a job is pushed to the Redis
-  transcode queue (`transcode-jobs`).
+**Description:** Sends an upload request to the upload service. The endpoint is
+idempotent by `fileHash`: if the hash already exists, the existing upload is
+returned. New uploads synchronously call `quota-service` at `POST /quota/check`;
+if quota allows the upload, the service writes the upload record and pushes a
+job to the Redis `transcode-jobs` queue.
 
-  Responses:
-    201  Upload accepted and saved
-    200  Matching file hash already exists
-    400  Missing or invalid request body fields
-    403  Upload blocked by quota service
-    500  Internal error
-```
+**Request body:**
+
+| Field | Type | Required | Meaning |
+| ----- | ---- | -------- | ------- |
+| `originalFilename` | string | required | Original uploaded file name |
+| `contentType` | string | required | MIME type for the file, such as `video/mp4` |
+| `fileSizeBytes` | number | required | File size in bytes; must be greater than `0` |
+| `uploadedBy` | string | required | User or account identifier for the uploader |
+| `fileHash` | string | required | Hash used for idempotency and duplicate detection |
+| `metadata` | object | optional | Extra upload metadata; defaults to `{}` |
+
+**Responses:**
+
+| Status | Meaning |
+| ------ | ------- |
+| 201 | Upload accepted and saved |
+| 200 | Matching `fileHash` already exists; existing upload returned |
+| 400 | Missing or invalid request body fields |
+| 403 | Upload blocked by quota service |
+| 500 | Internal error |
 
 **Example request:**
 
@@ -232,12 +246,32 @@ curl -X POST http://localhost:3000/upload \
 {
   "message": "Upload accepted",
   "upload": {
+    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
     "original_filename": "demo.mp4",
-    "status": "pending"
+    "storage_key": "uploads/1777314060000-demo.mp4",
+    "file_hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    "content_type": "video/mp4",
+    "file_size_bytes": "1000000",
+    "uploaded_by": "user-123",
+    "status": "pending",
+    "error_message": null,
+    "metadata": { "title": "Demo", "duration": "1" },
+    "created_at": "2026-04-27T18:21:00.000Z",
+    "updated_at": "2026-04-27T18:21:00.000Z",
+    "processing_started_at": null,
+    "processing_completed_at": null
   },
   "quota": {
     "allowed": true,
-    "reason": "ok"
+    "reason": "ok",
+    "userId": "user-123",
+    "requestedFileSizeBytes": 1000000,
+    "uploadCount": 0,
+    "uploadLimitCount": 10,
+    "remainingUploadSlots": 10,
+    "storageUsedBytes": 0,
+    "storageLimitBytes": 1073741824,
+    "remainingBytes": 1073741824
   }
 }
 ```
@@ -251,8 +285,18 @@ curl -X POST http://localhost:3000/upload \
   "upload": {
     "id": "7a8c9d4f-7648-4f8f-94f0-4455347aa101",
     "original_filename": "demo.mp4",
+    "storage_key": "uploads/1777314060000-demo.mp4",
     "file_hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-    "status": "pending"
+    "content_type": "video/mp4",
+    "file_size_bytes": "1000000",
+    "uploaded_by": "user-123",
+    "status": "pending",
+    "error_message": null,
+    "metadata": { "title": "Demo", "duration": "1" },
+    "created_at": "2026-04-27T18:21:00.000Z",
+    "updated_at": "2026-04-27T18:21:00.000Z",
+    "processing_started_at": null,
+    "processing_completed_at": null
   }
 }
 ```
@@ -480,25 +524,25 @@ curl "http://localhost:3003/resume?userId=user-123&videoId=video-456"
 
 ### GET /health
 
-```
-GET /health
+**Method and path:** `GET /health`
 
-  Returns the health status of the thumbnail worker, PostgreSQL, Redis, queue
-  depth, dead letter queue depth, and the timestamp of the last successfully
-  processed thumbnail job.
+**Description:** Returns the health status of the thumbnail worker, PostgreSQL,
+Redis, queue depth, dead letter queue depth, and the timestamp of the last
+successfully processed thumbnail job. The worker listens for `transcode-complete`
+Redis pub/sub events, validates the event payload, enqueues valid messages onto
+`thumbnail-jobs`, writes simulated thumbnail references to the catalog database,
+clears the catalog cache, and publishes `thumbnail.complete` after successful
+processing.
 
-  The worker listens for `transcode-complete` Redis pub/sub events, validates
-  the event payload, enqueues valid messages onto `thumbnail-jobs`, writes
-  simulated thumbnail references to the catalog database, clears the catalog
-  cache, and publishes `thumbnail.complete` after successful processing.
+Malformed messages and messages that reference a missing catalog video are
+treated as poison pills and moved to `thumbnail-dead-letter`. 
 
-  Malformed messages and messages that reference a missing catalog video are
-  treated as poison pills and moved to `thumbnail-dead-letter`. 
+**Responses:**
 
-  Responses:
-    200  Worker and dependencies healthy
-    503  PostgreSQL or Redis unhealthy
-```
+| Status | Meaning |
+| ------ | ------- |
+| 200 | Worker and dependencies healthy |
+| 503 | PostgreSQL or Redis unhealthy |
 
 **Example request:**
 
