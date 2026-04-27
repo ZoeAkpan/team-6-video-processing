@@ -292,12 +292,13 @@ async function processTranscodeComplete(event) {
   )
 }
 
-async function moveToDeadLetter(raw, errorMessage) {
+async function moveToDeadLetter(raw, errorMessage, metadata = {}) {
   await redis.lPush(
     DEAD_LETTER_QUEUE_NAME,
     JSON.stringify({
       raw,
       error: errorMessage,
+      ...metadata,
       failedAt: new Date().toISOString(),
     })
   )
@@ -315,7 +316,11 @@ async function handleTranscodeComplete(raw) {
     )
   } catch (err) {
     console.error('Thumbnail event enqueue failed:', err.message)
-    await moveToDeadLetter(raw, err.message)
+    await moveToDeadLetter(raw, err.message, {
+      failureType: err instanceof PoisonPillError ? 'poison_pill' : 'enqueue_failure',
+      attempts: 0,
+      lastErrorCode: err.code,
+    })
   }
 }
 
