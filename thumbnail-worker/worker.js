@@ -252,12 +252,17 @@ async function writeThumbnailReferences(thumbnailReferences) {
 
     await client.query('COMMIT')
   } catch (err) {
-    await client.query('ROLLBACK')
+    try {
+      await client.query('ROLLBACK')
+    } catch (rollbackErr) {
+      console.error('Thumbnail transaction rollback failed:', rollbackErr.message)
+    }
     throw err
   } finally {
     client.release()
   }
 }
+
 
 async function processTranscodeComplete(event) {
   // Marks which job is currently being handled, so that it 
