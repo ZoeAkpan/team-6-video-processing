@@ -321,6 +321,19 @@ async function moveToDeadLetter(raw, errorMessage, metadata = {}) {
   )
 }
 
+async function safelyMoveToDeadLetter(raw, errorMessage, metadata = {}) {
+  try {
+    await moveToDeadLetter(raw, errorMessage, metadata)
+    return true
+  } catch (err) {
+    console.error(
+      `Thumbnail dead-letter write failed originalError="${errorMessage}" dlqError="${err.message}"`
+    )
+    return false
+  }
+}
+
+
 async function handleTranscodeComplete(raw) {
   let event
 
