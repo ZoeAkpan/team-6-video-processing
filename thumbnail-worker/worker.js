@@ -262,6 +262,7 @@ async function processTranscodeComplete(event) {
   console.log(
     `thumbnail extracting simulated refs job=${event.jobId} count=${thumbnailReferences.length}`
   )
+  await ensureVideoExists(event.videoId)
   await writeThumbnailReferences(thumbnailReferences)
   console.log(
     `thumbnail wrote refs job=${event.jobId} video=${event.videoId} count=${thumbnailReferences.length}`
