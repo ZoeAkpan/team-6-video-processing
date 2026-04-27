@@ -201,7 +201,7 @@ POST /upload
   it makes a synchronous HTTP call to
   quota-service at POST /quota/check. If the quota check passes, the upload
   record is inserted into the upload database and a job is pushed to the Redis
-  transcode queue.
+  transcode queue (`transcode-jobs`).
 
   Responses:
     201  Upload accepted and saved
@@ -238,6 +238,21 @@ curl -X POST http://localhost:3000/upload \
   "quota": {
     "allowed": true,
     "reason": "ok"
+  }
+}
+```
+
+**Example response (200, duplicate fileHash):**
+
+```json
+{
+  "message": "Upload already exists",
+  "idempotent": true,
+  "upload": {
+    "id": "7a8c9d4f-7648-4f8f-94f0-4455347aa101",
+    "original_filename": "demo.mp4",
+    "file_hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    "status": "pending"
   }
 }
 ```
@@ -458,6 +473,52 @@ curl "http://localhost:3003/resume?userId=user-123&videoId=video-456"
   "error": "resume position not found",
   "userId": "user-123",
   "videoId": "video-456"
+}
+```
+
+## thumbnail-worker
+
+### GET /health
+
+```
+GET /health
+
+  Returns the health status of the thumbnail worker, PostgreSQL, Redis, queue
+  depth, dead letter queue depth, and the timestamp of the last successfully
+  processed thumbnail job.
+
+  The worker listens for `transcode-complete` Redis pub/sub events, validates
+  the event payload, enqueues valid messages onto `thumbnail-jobs`, writes
+  simulated thumbnail references to the catalog database, clears the catalog
+  cache, and publishes `thumbnail.complete` after successful processing.
+
+  Malformed messages and messages that reference a missing catalog video are
+  treated as poison pills and moved to `thumbnail-dead-letter`. 
+
+  Responses:
+    200  Worker and dependencies healthy
+    503  PostgreSQL or Redis unhealthy
+```
+
+**Example request:**
+
+```bash
+curl http://localhost:3005/health
+```
+
+**Example response (200):**
+
+```json
+{
+  "status": "healthy",
+  "db": "ok",
+  "redis": "ok",
+  "queueDepth": 0,
+  "deadLetterQueueDepth": 3,
+  "lastSuccessfullyProcessedJobAt": "2026-04-27T18:20:00.000Z",
+  "inFlightJobId": null,
+  "subscribedChannels": ["transcode-complete"],
+  "timestamp": "2026-04-27T18:21:00.000Z"
 }
 ```
 
