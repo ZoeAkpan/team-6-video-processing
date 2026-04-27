@@ -1,7 +1,6 @@
 // code from health endpoint section 
 
 import express from 'express'
-import crypto from 'node:crypto'
 import pg from 'pg'
 import { createClient } from 'redis'
 
@@ -33,29 +32,26 @@ async function checkQuota(userId, fileSizeBytes, fileHash) {
   return payload
 }
 
-function normalizeHash(fileHash) {
-  return fileHash.trim().toLowerCase()
+async function consumeQuota(userId, fileSizeBytes, fileHash) {
+  const response = await fetch(`${quotaServiceUrl}/quota/consume`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, fileSizeBytes, fileHash }),
+  })
+
+  const payload = await response.json()
+
+  if (!response.ok) {
+    const error = new Error(payload.error ?? 'quota consume failed')
+    error.status = response.status
+    throw error
+  }
+
+  return payload
 }
 
-async function enqueueTranscodeJob(upload, metadata) {
-  const now = new Date().toISOString()
-
-  await redis.hSet(`job:${upload.id}`, {
-    status: 'queued',
-    createdAt: now,
-    updatedAt: now,
-  })
-  await redis.expire(`job:${upload.id}`, 24 * 60 * 60)
-
-  await redis.lPush('transcode-jobs', JSON.stringify({
-    jobId: upload.id,
-    videoId: upload.id,
-    originalFilename: upload.original_filename,
-    contentType: upload.content_type,
-    fileSizeBytes: Number(upload.file_size_bytes),
-    uploadedBy: upload.uploaded_by,
-    metadata,
-  }))
+async function enqueueTranscodeJob(uploadPayload) {
+  await redis.lPush('transcode-jobs', JSON.stringify(uploadPayload))
 } 
 
 app.get('/health', async (req, res) => {
@@ -95,18 +91,42 @@ app.get('/health', async (req, res) => {
 })
 
 app.post('/upload', async (req, res) => {
+
+  const expectedFields = ["originalFilename", "contentType", "fileSizeBytes", "uploadedBy", "fileHash", "duration"]
+
+  if (!expectedFields.every(field => field in req.body)) {
+    return res.status(400).json({
+      error: 'missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration',
+    })
+  }
   const {
     originalFilename,
     contentType,
     fileSizeBytes,
     uploadedBy,
     fileHash,
-    metadata = {},
-  } = req.body ?? {}
+    duration
+  } = req.body
 
-  if (!originalFilename || !contentType || !uploadedBy || typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
+  const uploadPayload = {
+    originalFilename,
+    contentType,
+    fileSizeBytes,
+    uploadedBy,
+    fileHash,
+    duration
+  }
+
+  // validate fields
+  if (typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
     return res.status(400).json({
-      error: 'originalFilename, contentType, uploadedBy, and positive numeric fileSizeBytes are required',
+      error: 'fileSizeBytes must be a positive number',
+    })
+  }
+
+  if (typeof duration !== 'number' || duration <= 0) {
+    return res.status(400).json({
+      error: 'duration must be a positive number',
     })
   }
 
@@ -116,80 +136,60 @@ app.post('/upload', async (req, res) => {
     })
   }
 
-  const uploadFileHash = normalizeHash(fileHash)
-
+  // idempotency check
   try {
-    const existingUpload = await pool.query(
-      'SELECT * FROM upload WHERE file_hash = $1',
-      [uploadFileHash]
-    )
 
-    if (existingUpload.rowCount > 0) {
+    const exists = await redis.get(`upload:${fileHash}`)
+
+    if (exists) { // duplicate upload
       return res.status(200).json({
-        message: 'Upload already exists',
-        upload: existingUpload.rows[0],
-        idempotent: true,
+        message: 'An upload with this file hash already exists',
+        fileHash,
+        upload: uploadPayload
       })
     }
-
-    const quota = await checkQuota(uploadedBy, fileSizeBytes, uploadFileHash)
+  
+    const quota = await checkQuota(uploadedBy, fileSizeBytes, fileHash)
 
     if (!quota.allowed) {
       return res.status(403).json({
         error: 'Upload blocked by quota service',
         quota,
+        upload: uploadPayload
       })
     }
 
-    const storageKey = `uploads/${Date.now()}-${originalFilename}`
-    const uploadId = crypto.randomUUID()
-    const { rows } = await pool.query(
+    await pool.query(
       `INSERT INTO upload (
-        id,
         original_filename,
-        storage_key,
-        file_hash,
         content_type,
         file_size_bytes,
         uploaded_by,
-        status,
-        metadata
+        file_hash,
+        duration
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (file_hash) DO NOTHING
-      RETURNING *`,
+      VALUES ($1, $2, $3, $4, $5, $6)`,
       [
-        uploadId,
         originalFilename,
-        storageKey,
-        uploadFileHash,
         contentType,
         fileSizeBytes,
         uploadedBy,
-        'pending',
-        JSON.stringify(metadata),
+        fileHash,
+        duration
       ]
     )
 
-    if (rows.length === 0) {
-      const duplicate = await pool.query(
-        'SELECT * FROM upload WHERE file_hash = $1',
-        [uploadFileHash]
-      )
+    await redis.set(`upload:${fileHash}`, "1")
+    const quotaConsumption = await consumeQuota(uploadedBy, fileSizeBytes, fileHash)
 
-      return res.status(200).json({
-        message: 'Upload already exists',
-        upload: duplicate.rows[0],
-        idempotent: true,
-      })
-    }
-
-    await enqueueTranscodeJob(rows[0], metadata)
+    await enqueueTranscodeJob(uploadPayload)
+    
 
     return res.status(201).json({
       message: 'Upload accepted',
-      upload: rows[0],
+      upload: uploadPayload,
       quota,
+      quotaConsumption,
     })
   } catch (err) {
     return res.status(err.status ?? 500).json({
