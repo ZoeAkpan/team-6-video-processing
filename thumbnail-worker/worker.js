@@ -31,6 +31,9 @@ const MAX_DB_RETRY_ATTEMPTS = Number(process.env.THUMBNAIL_DB_RETRY_ATTEMPTS || 
 const DB_RETRY_BASE_DELAY_MS = Number(
   process.env.THUMBNAIL_DB_RETRY_BASE_DELAY_MS || 500
 )
+const QUEUE_RETRY_DELAY_MS = Number(
+  process.env.THUMBNAIL_QUEUE_RETRY_DELAY_MS || 1000
+)
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -131,6 +134,10 @@ async function getHealthSnapshot() {
 function parseTranscodeComplete(raw) {
   let event
 
+  if (typeof raw !== 'string' || !raw.trim()) {
+    throw new PoisonPillError('event payload must be non-empty JSON')
+  }
+
   try {
     event = JSON.parse(raw)
   } catch (err) {
@@ -145,6 +152,10 @@ function parseTranscodeComplete(raw) {
     throw new PoisonPillError('jobId and videoId are required')
   }
 
+  if (typeof event.jobId !== 'string' || !event.jobId.trim()) {
+    throw new PoisonPillError('jobId must be a non-empty string')
+  }
+
   if (
     typeof event.videoId !== 'string' ||
     !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
@@ -156,6 +167,7 @@ function parseTranscodeComplete(raw) {
 
   return event
 }
+
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
