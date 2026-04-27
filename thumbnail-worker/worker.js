@@ -325,12 +325,45 @@ async function handleTranscodeComplete(raw) {
 }
 
 async function processQueuedEvent(raw) {
+  let attempts = 0
+
   try {
     const event = parseTranscodeComplete(raw)
-    await processTranscodeComplete(event)
+    while (true) {
+      try {
+        attempts += 1
+        await processTranscodeComplete(event)
+        return
+      } catch (err) {
+        if (err instanceof PoisonPillError) {
+          throw err
+        }
+
+        if (!isTransientDatabaseError(err) || attempts >= MAX_DB_RETRY_ATTEMPTS) {
+          await moveToDeadLetter(raw, err.message, {
+            failureType: isTransientDatabaseError(err)
+              ? 'temporary_db_failure'
+              : 'processing_failure',
+            attempts,
+            lastErrorCode: err.code,
+          })
+          return
+        }
+
+        const delayMs = DB_RETRY_BASE_DELAY_MS * attempts
+        console.warn(
+          `thumbnail temporary db failure job=${event.jobId} attempt=${attempts}/${MAX_DB_RETRY_ATTEMPTS} retryInMs=${delayMs}: ${err.message}`
+        )
+        await sleep(delayMs)
+      }
+    }
   } catch (err) {
     console.error('Thumbnail event failed:', err.message)
-    await moveToDeadLetter(raw, err.message)
+    await moveToDeadLetter(raw, err.message, {
+      failureType: err instanceof PoisonPillError ? 'poison_pill' : 'processing_failure',
+      attempts,
+      lastErrorCode: err.code,
+    })
   } finally {
     inFlightJobId = null
   }
