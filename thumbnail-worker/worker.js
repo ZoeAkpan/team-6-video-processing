@@ -427,8 +427,16 @@ async function workerLoop() {
 }
 
 app.get('/health', async (_req, res) => {
-  const snapshot = await getHealthSnapshot()
-  return res.status(snapshot.healthy ? 200 : 503).json(snapshot.body)
+  try {
+    const snapshot = await getHealthSnapshot()
+    return res.status(snapshot.healthy ? 200 : 503).json(snapshot.body)
+  } catch (err) {
+    return res.status(503).json({
+      status: 'unhealthy',
+      error: err.message,
+      timestamp: new Date().toISOString(),
+    })
+  }
 })
 
 app.use((_req, res) => {
