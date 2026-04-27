@@ -134,19 +134,29 @@ function parseTranscodeComplete(raw) {
   try {
     event = JSON.parse(raw)
   } catch (err) {
-    throw new Error(`invalid json: ${err.message}`)
+    throw new PoisonPillError(`invalid json: ${err.message}`)
   }
 
   if (!event || typeof event !== 'object') {
-    throw new Error('event payload must be an object')
+    throw new PoisonPillError('event payload must be an object')
   }
 
   if (!event.jobId || !event.videoId) {
-    throw new Error('jobId and videoId are required')
+    throw new PoisonPillError('jobId and videoId are required')
+  }
+
+  if (
+    typeof event.videoId !== 'string' ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      event.videoId
+    )
+  ) {
+    throw new PoisonPillError('videoId must be a valid UUID')
   }
 
   return event
 }
+
 // figure out the video duration 
 function getDurationSeconds(event) {
   const rawDuration = event.metadata?.duration ?? event.durationSeconds ?? 30
