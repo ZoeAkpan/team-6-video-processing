@@ -173,6 +173,17 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function burnCpu(ms) {
+  const deadline = Date.now() + ms
+  let x = Math.random()
+
+  while (Date.now() < deadline) {
+    x = Math.sqrt(x * x + 1.3) / 1.00001
+  }
+
+  return x
+}
+
 function isTransientDatabaseError(err) {
   const transientCodes = new Set([
     '40001', // serialization_failure
@@ -270,16 +281,23 @@ async function processTranscodeComplete(event) {
   inFlightJobId = event.jobId
   console.log(`thumbnail processing started job=${event.jobId} video=${event.videoId}`)
 
-  // Simulate time taken to process the thumbnail job.
+  await ensureVideoExists(event.videoId)
+
+  // Thumbnail extraction is CPU-bound, so burn CPU instead of sleeping.
   if (PROCESSING_DELAY_MS > 0) {
-    await new Promise((resolve) => setTimeout(resolve, PROCESSING_DELAY_MS))
+    console.log(
+      `thumbnail extracting simulated cpu job=${event.jobId} cpuMs=${PROCESSING_DELAY_MS}`
+    )
+    const cpuResult = burnCpu(PROCESSING_DELAY_MS)
+    if (!Number.isFinite(cpuResult)) {
+      console.warn(`thumbnail cpu simulation produced invalid result job=${event.jobId}`)
+    }
   }
 
   const thumbnailReferences = buildThumbnailReferences(event)
   console.log(
     `thumbnail extracting simulated refs job=${event.jobId} count=${thumbnailReferences.length}`
   )
-  await ensureVideoExists(event.videoId)
   await writeThumbnailReferences(thumbnailReferences)
   console.log(
     `thumbnail wrote refs job=${event.jobId} video=${event.videoId} count=${thumbnailReferences.length}`
