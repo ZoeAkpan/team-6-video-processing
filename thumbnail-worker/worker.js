@@ -346,7 +346,7 @@ async function handleTranscodeComplete(raw) {
     )
   } catch (err) {
     console.error('Thumbnail event enqueue failed:', err.message)
-    await moveToDeadLetter(raw, err.message, {
+    await safelyMoveToDeadLetter(raw, err.message, {
       failureType: err instanceof PoisonPillError ? 'poison_pill' : 'enqueue_failure',
       attempts: 0,
       lastErrorCode: err.code,
@@ -370,7 +370,7 @@ async function processQueuedEvent(raw) {
         }
 
         if (!isTransientDatabaseError(err) || attempts >= MAX_DB_RETRY_ATTEMPTS) {
-          await moveToDeadLetter(raw, err.message, {
+          await safelyMoveToDeadLetter(raw, err.message, {
             failureType: isTransientDatabaseError(err)
               ? 'temporary_db_failure'
               : 'processing_failure',
@@ -389,7 +389,7 @@ async function processQueuedEvent(raw) {
     }
   } catch (err) {
     console.error('Thumbnail event failed:', err.message)
-    await moveToDeadLetter(raw, err.message, {
+    await safelyMoveToDeadLetter(raw, err.message, {
       failureType: err instanceof PoisonPillError ? 'poison_pill' : 'processing_failure',
       attempts,
       lastErrorCode: err.code,
@@ -414,7 +414,13 @@ async function workerLoop() {
 
       console.error('Thumbnail queue processing failed:', err.message)
       if (raw) {
-        await moveToDeadLetter(raw, err.message)
+        await safelyMoveToDeadLetter(raw, err.message, {
+          failureType: 'queue_processing_failure',
+          lastErrorCode: err.code,
+        })
+      }
+      if (QUEUE_RETRY_DELAY_MS > 0) {
+        await sleep(QUEUE_RETRY_DELAY_MS)
       }
     }
   }
