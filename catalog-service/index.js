@@ -89,6 +89,11 @@ app.get("/health", async (req, res) => {
     health.redis = "error: " + err.message;
   }
 
+  try {
+    health.dlq_depth = await redisClient.lLen(DLQ_KEY);
+  } catch (err) {
+    health.dlq_depth = -1;
+  }
   const statusCode = health.status === "healthy" ? 200 : 503;
   res.status(statusCode).json(health);
 });
@@ -97,8 +102,13 @@ app.get("/videos", async (req, res) => {
   try {
     const cached = await redisClient.get("catalog:videos:available");
     if (cached) {
-      console.log("[cache hit] /videos served from Redis");
-      return res.json(JSON.parse(cached));
+      try {
+        console.log("[cache hit] /videos served from Redis");
+        return res.json(JSON.parse(cached));
+      } catch (e) {
+        console.warn("[cache] corrupted JSON in catalog:videos:available, deleting");
+        await redisClient.del("catalog:videos:available");
+      }
     }
 
     console.log("[cache miss] /videos querying DB");
@@ -128,16 +138,34 @@ app.get("/video/search", async (req,res) => {
     res.status(500).json({ error: err.message});
   }
 })
-redisSub.subscribe("video.rejected", async (message) => {
+async function handleRejection(message, attempt = 1) {
   try {
-    const { video_id } = JSON.parse(message);
-    await pool.query(`UPDATE video SET status = 'unavailable' WHERE id = $1`, [video_id]);
+    const parsed = JSON.parse(message);
+    const { fileHash } = parsed;
+    if (!fileHash) throw new Error("missing fileHash");
+
+    await pool.query(
+      `UPDATE video SET status = 'unavailable' WHERE file_hash = $1`,
+      [fileHash]
+    );
     await redisClient.del("catalog:videos:available");
-    console.log(`[moderation-sub] marked video ${video_id} as unavailable`);
+    console.log(`[moderation-sub] marked video ${fileHash} as unavailable`);
   } catch (err) {
-    console.error("[moderation-sub] error:", err.message);
+    if (attempt < 3) {
+      const delay = Math.pow(2, attempt) * 100;
+      console.warn(`[moderation-sub] retry ${attempt}/3 in ${delay}ms — ${err.message}`);
+      await new Promise((r) => setTimeout(r, delay));
+      return handleRejection(message, attempt + 1);
+    }
+    console.error(`[moderation-sub] sending to DLQ after 3 attempts — ${err.message}`);
+    await redisClient.lPush(
+      DLQ_KEY,
+      JSON.stringify({ message, error: err.message, at: new Date().toISOString() })
+    );
   }
-});
+}
+
+redisSub.subscribe("video-rejected", (message) => handleRejection(message));
 
 app.get("/video/:id", async (req, res) => {
   const {id} = req.params;
