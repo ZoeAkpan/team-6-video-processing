@@ -25,13 +25,12 @@ $$ LANGUAGE plpgsql;
 
 CREATE TABLE IF NOT EXISTS video (
     id                UUID         PRIMARY KEY DEFAULT gen_random_uuid(),
-    upload_id         UUID         NOT NULL UNIQUE,
+    fileHash          UUID         NOT NULL UNIQUE,
     user_id           TEXT         NOT NULL,
     title             TEXT         NOT NULL,
     original_filename TEXT         NOT NULL,
     duration_seconds  INTEGER      NOT NULL CHECK (duration_seconds > 0),
     status            video_status NOT NULL DEFAULT 'processing',
-    metadata          JSONB        NOT NULL DEFAULT '{}'::jsonb,
     uploaded_at       TIMESTAMPTZ  NOT NULL,
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
