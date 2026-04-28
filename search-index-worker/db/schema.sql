@@ -1,7 +1,11 @@
 CREATE TABLE IF NOT EXISTS video_search_index (
-    video_id VARCHAR(255) PRIMARY KEY,
-    title TEXT NOT NULL,
-    description TEXT,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    indexed_at TIMESTAMPTZ NOT NULL
+    file_hash TEXT PRIMARY KEY,
+    original_filename TEXT NOT NULL,
+    content_type VARCHAR(100),
+    file_size_bytes BIGINT,
+    uploaded_by TEXT,
+    status VARCHAR(20),
+    duration NUMERIC(10, 2),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    indexed_at TIMESTAMPTZ DEFAULT NOW()
 );
