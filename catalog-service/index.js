@@ -143,16 +143,21 @@ app.get("/video/:id", async (req, res) => {
   const {id} = req.params;
 
   try {
-    const cached = await redisClient.get(`video: ${id}`);
+    const cached = await redisClient.get(`video:${id}`);
     if (cached) {
-      console.log(`[cache hit] /videos/${id} served from Redis`);
-      return res.json(JSON.parse(cached));
+      try{
+        const parsed = JSON.parse(cached);
+        console.log(`[cache hit] /videos/${id} served from Redis`);
+        return res.json(parsed);
+      } catch (err) {
+        console.error(`[cached corruption] invalid JSON for video:${id}, deleting`);
+        await redisClient.del(`video:${id}`);
+      }
     }
-
     console.log(`[cache miss] /videos/${id} querying DB`);
     const result = await pool.query(
       `SELECT * FROM video WHERE id = $1 AND status = 'available'`, [id]
-    )
+    );
 
     if (result.rows.length === 0){
       return res.status(404).json({ error: "video not found"});
@@ -160,7 +165,7 @@ app.get("/video/:id", async (req, res) => {
 
     const video = result.rows[0];
     await redisClient.set(`video:${id}`, JSON.stringify(video), {EX:60});
-    res.json(result.rows);
+    res.json(video);
   } catch (err) {
     res.status(500).json({ error: err.message});
   }
