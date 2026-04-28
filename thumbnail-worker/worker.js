@@ -148,12 +148,8 @@ function parseTranscodeComplete(raw) {
     throw new PoisonPillError('event payload must be an object')
   }
 
-  if (!event.jobId || !event.videoId) {
-    throw new PoisonPillError('jobId and videoId are required')
-  }
-
-  if (typeof event.jobId !== 'string' || !event.jobId.trim()) {
-    throw new PoisonPillError('jobId must be a non-empty string')
+  if (!event.videoId) {
+    throw new PoisonPillError('videoId is required')
   }
 
   if (
@@ -163,6 +159,10 @@ function parseTranscodeComplete(raw) {
     )
   ) {
     throw new PoisonPillError('videoId must be a valid UUID')
+  }
+
+  if (event.jobId !== undefined && typeof event.jobId !== 'string') {
+    throw new PoisonPillError('jobId must be a string when provided')
   }
 
   return event
@@ -221,7 +221,8 @@ async function ensureVideoExists(videoId) {
 
 // figure out the video duration 
 function getDurationSeconds(event) {
-  const rawDuration = event.metadata?.duration ?? event.durationSeconds ?? 30
+  const rawDuration =
+    event.metadata?.duration ?? event.duration ?? event.durationSeconds ?? 30
   const duration = Number.parseInt(rawDuration, 10)
 
   if (!Number.isFinite(duration) || duration <= 0) {
@@ -281,10 +282,12 @@ async function writeThumbnailReferences(thumbnailReferences) {
 
 
 async function processTranscodeComplete(event) {
+  const traceId = event.jobId?.trim() || event.videoId
+
   // Marks which job is currently being handled, so that it 
   // can be reported in the health check 
-  inFlightJobId = event.jobId
-  console.log(`thumbnail processing started job=${event.jobId} video=${event.videoId}`)
+  inFlightJobId = traceId
+  console.log(`thumbnail processing started job=${traceId} video=${event.videoId}`)
 
   await ensureVideoExists(event.videoId)
 
@@ -292,21 +295,21 @@ async function processTranscodeComplete(event) {
   if (PROCESSING_DELAY_MS > 0) {
     const processingMs = withJitter(PROCESSING_DELAY_MS)
     console.log(
-      `thumbnail extracting simulated cpu job=${event.jobId} baseCpuMs=${PROCESSING_DELAY_MS} actualCpuMs=${Math.round(processingMs)}`
+      `thumbnail extracting simulated cpu job=${traceId} baseCpuMs=${PROCESSING_DELAY_MS} actualCpuMs=${Math.round(processingMs)}`
     )
     const cpuResult = burnCpu(processingMs)
     if (!Number.isFinite(cpuResult)) {
-      console.warn(`thumbnail cpu simulation produced invalid result job=${event.jobId}`)
+      console.warn(`thumbnail cpu simulation produced invalid result job=${traceId}`)
     }
   }
 
   const thumbnailReferences = buildThumbnailReferences(event)
   console.log(
-    `thumbnail extracting simulated refs job=${event.jobId} count=${thumbnailReferences.length}`
+    `thumbnail extracting simulated refs job=${traceId} count=${thumbnailReferences.length}`
   )
   await writeThumbnailReferences(thumbnailReferences)
   console.log(
-    `thumbnail wrote refs job=${event.jobId} video=${event.videoId} count=${thumbnailReferences.length}`
+    `thumbnail wrote refs job=${traceId} video=${event.videoId} count=${thumbnailReferences.length}`
   )
 
   const processedAt = new Date().toISOString()
@@ -319,17 +322,17 @@ async function processTranscodeComplete(event) {
   await redis.publish(
     THUMBNAIL_COMPLETE_CHANNEL,
     JSON.stringify({
-      jobId: event.jobId,
+      jobId: traceId,
       videoId: event.videoId,
       status: 'complete',
       thumbnails: thumbnailReferences,
       processedAt,
     })
   )
-  console.log(`thumbnail published complete job=${event.jobId}`)
+  console.log(`thumbnail published complete job=${traceId}`)
 
   console.log(
-    `thumbnail job=${event.jobId} video=${event.videoId} refs=${thumbnailReferences.length} status=complete`
+    `thumbnail job=${traceId} video=${event.videoId} refs=${thumbnailReferences.length} status=complete`
   )
 }
 
@@ -365,8 +368,9 @@ async function handleTranscodeComplete(raw) {
     event = parseTranscodeComplete(raw)
     await redis.rPush(QUEUE_NAME, raw)
     const queueDepth = await redis.lLen(QUEUE_NAME)
+    const traceId = event.jobId?.trim() || event.videoId
     console.log(
-      `thumbnail event received job=${event.jobId} video=${event.videoId} queued=true queueDepth=${queueDepth}`
+      `thumbnail event received job=${traceId} video=${event.videoId} queued=true queueDepth=${queueDepth}`
     )
   } catch (err) {
     console.error('Thumbnail event enqueue failed:', err.message)
@@ -383,6 +387,7 @@ async function processQueuedEvent(raw) {
 
   try {
     const event = parseTranscodeComplete(raw)
+    const traceId = event.jobId?.trim() || event.videoId
     while (true) {
       try {
         attempts += 1
@@ -406,7 +411,7 @@ async function processQueuedEvent(raw) {
 
         const delayMs = DB_RETRY_BASE_DELAY_MS * attempts
         console.warn(
-          `thumbnail temporary db failure job=${event.jobId} attempt=${attempts}/${MAX_DB_RETRY_ATTEMPTS} retryInMs=${delayMs}: ${err.message}`
+          `thumbnail temporary db failure job=${traceId} attempt=${attempts}/${MAX_DB_RETRY_ATTEMPTS} retryInMs=${delayMs}: ${err.message}`
         )
         await sleep(delayMs)
       }
