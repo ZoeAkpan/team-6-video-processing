@@ -119,7 +119,7 @@ function getValidPayload(raw) {
     }
 
     const allowedKeys = [
-      "originalFileName",
+      "originalFilename",
       "contentType",
       "fileSizeBytes",
       "uploadedBy",
@@ -147,7 +147,7 @@ function getValidPayload(raw) {
 
     // capture just what we need (discard "status" and "updatedAt")
     const {
-      originalFileName,
+      originalFilename,
       contentType,
       fileSizeBytes,
       uploadedBy,
@@ -158,7 +158,7 @@ function getValidPayload(raw) {
     return {
       valid: true,
       video: {
-        originalFileName,
+        originalFilename,
         contentType,
         fileSizeBytes,
         uploadedBy,
