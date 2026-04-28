@@ -99,7 +99,7 @@ app.get("/health", async (req, res) => {
 });
 
 app.post("/add-video", async (req, res) => {
-  console.log(`got request to add a video to catalog db`)
+  console.log(`got a request to add a video to catalog db`)
   // error checking: make sure the request body has the necessary fields
   const expectedFields = [
     'originalFilename',
@@ -125,6 +125,8 @@ app.post("/add-video", async (req, res) => {
     fileHash,
     duration,
   } = req.body
+
+  console.log(`file hash is ${fileHash}`)
 
   // make sure this fileHash is not already in the catalog db (should never have to worry about this)
   const rows = await pool.query(
@@ -164,8 +166,56 @@ app.post("/add-video", async (req, res) => {
     })
   }
   
+})
 
+app.post("/mod-result", async (req, res) => {
+  console.log(`got a request to update a video's moderation status`)
+  // error checking: make sure the request body has the necessary fields
+  const expectedFields = [
+    'fileHash',
+    'status',
+  ]
+  if (!expectedFields.every((field) => field in req.body)) {
+    console.log("invalid request body, returning 400")
+    return res.status(400).json({
+      error:
+        'missing fields from request body: fileHash and status',
+    })
+  }
 
+  const { fileHash, status } = req.body
+  console.log(`file hash is ${fileHash}`)
+
+  // make sure this fileHash IS already in the catalog db (should never have to worry about this)
+  const rows = await pool.query(
+    `SELECT 1 FROM video WHERE file_hash = $1`,
+    [fileHash]
+  )
+  if (rows.length === 0) {
+    console.log("no videos in catalog db with that file hash")
+    return res.status(401).json({
+      error: 'no video with that file hash found in catalog',
+    })
+  }
+
+  // update video's moderation status
+  try {
+    await pool.query(
+      `UPDATE video SET moderation_status = $1, updated_at = NOW() WHERE file_hash = $2`,
+      [status, fileHash]
+    )
+
+    console.log(`moderation status set in database to ${status}`)
+    return res.status(200).json({
+      message: "moderation status recorded",
+    })
+  } catch (err) {
+    console.error(`error updating database: ${err.message}`)
+    return res.status(500).json({
+      error: `database error: ${err.message}`,
+    })
+  }
+  
 })
 
 app.get("/videos", async (req, res) => {
