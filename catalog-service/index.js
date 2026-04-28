@@ -37,7 +37,7 @@ subscriber.subscribe("transcode_complete", async (message) => {console.log("[tra
   
   try{
     const video = await pool.query(
-      `SELECT id FROM video WHERE fileHash = $1`,
+      `SELECT 1 FROM video WHERE file_hash = $1`,
       [data.fileHash]
     );
     if (video.rows.length === 0) {
@@ -97,6 +97,72 @@ app.get("/health", async (req, res) => {
   const statusCode = health.status === "healthy" ? 200 : 503;
   res.status(statusCode).json(health);
 });
+
+app.post("/add-video", async (req, res) => {
+
+  // error checking: make sure the request body has the necessary fields
+  const expectedFields = [
+    'originalFilename',
+    'contentType',
+    'fileSizeBytes',
+    'uploadedBy',
+    'fileHash',
+    'duration',
+  ]
+  if (!expectedFields.every((field) => field in req.body)) {
+    return res.status(400).json({
+      error:
+        'missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration',
+    })
+  }
+
+  const {
+    originalFilename,
+    contentType,
+    fileSizeBytes,
+    uploadedBy,
+    fileHash,
+    duration,
+  } = req.body
+
+  // make sure this fileHash is not already in the catalog db (should never have to worry about this)
+  const rows = await pool.query(
+    `SELECT 1 FROM video WHERE file_hash = $1`,
+    [fileHash]
+  )
+  if (rows.length > 0) {
+    return res.status(401).json({
+      error: 'video already exists in catalog, cannot reupload',
+    })
+  }
+
+  // add video to catalog db
+  try {
+    await pool.query(
+      `INSERT INTO video (
+        file_hash,
+        original_filename,
+        content_type,
+        file_size_bytes,
+        uploaded_by,
+        duration,
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)`,
+      [fileHash, originalFilename, contentType, fileSizeBytes, uploadedBy, duration]
+    )
+
+    return res.status(200).json({
+      message: "upload to catalog db accepted",
+    })
+  } catch (err) {
+    return res.status(500).json({
+      error: `database error: ${err.message}`,
+    })
+  }
+  
+
+
+})
 
 app.get("/videos", async (req, res) => {
   try {

@@ -6,6 +6,7 @@ const QUEUE_NAME = 'transcode-jobs';
 const DEAD_LETTER_QUEUE_NAME = 'transcode-dead-letter';
 const PORT = Number(process.env.PORT || 3004);
 const VIDEO_PROCESSING_RATE = 1; // seconds of processing time per second of video duration
+const CATALOG_DB_UPLOAD_ENDPOINT = "http://catalog-service:3002/new-video";
 
 const app = express();
 const client = redis.createClient({ url: redisUrl });
@@ -77,8 +78,14 @@ async function processJob(job) {
     const finishedAt = new Date().toISOString();
     await client.set('transcode:lastJobAt', finishedAt);
 
-    // add to Catalog DB
-
+    // add to Catalog DB 
+    await fetch(CATALOG_DB_UPLOAD_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(job),
+    });
+    console.log("added video to catalog db");
+    
     // publish transcode-complete event
     await client.publish('transcode-complete', JSON.stringify({
         fileHash: job.fileHash,
@@ -90,6 +97,7 @@ async function processJob(job) {
         duration: job.duration,
         updatedAt: finishedAt,
     }));
+    console.log("published transcode-complete event");
 
     console.log(`job ${job.fileHash} status=complete`);
 }
