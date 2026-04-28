@@ -12,6 +12,7 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
 const TRANSCODE_COMPLETE_EVENT = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode-complete'
 const VIDEO_REJECTED_EVENT = process.env.VIDEO_REJECTED_CHANNEL || 'video-rejected'
 const MODERATION_PASS_RATE = Number(process.env.MODERATION_PASS_RATE || 0.8)
+const DLQ_NAME = "moderation-worker:dlq"
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -178,10 +179,14 @@ async function handleTranscodeComplete(rawMessage) {
 
   if (!result.valid) {
     // invalid payload, add to DLQ
+    console.log(`Payload is invalid: ${result.error}, adding to DLQ`)
+    await redis.lpush(DLQ_NAME, result.raw)
     return
   }
 
   // valid payload, simulate content review and add to db
+  console.log("Payload is valid")
+
   const payload = result.video
 
   const fileHash = payload.fileHash
