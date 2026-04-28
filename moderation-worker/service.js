@@ -92,7 +92,7 @@ function simulateContentReview(videoData) {
   const status = approved ? 'approved' : 'rejected'
   const reason = approved ? 'passed_automated_review' : 'rejected_automated_review'
 
-  console.log(`Completed content review for video ${videoData.videoId}. Result: ${status}`)
+  console.log(`Completed content review for video ${videoData.fileHash}. Result: ${status}`)
   
   return [ approved, status, reason ]
 }
