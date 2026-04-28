@@ -343,6 +343,7 @@ services:
       DATABASE_URL: postgres://user:pass@upload-db:5432/upload_db
       REDIS_URL: redis://redis:6379
       QUOTA_SERVICE_URL: http://quota-service:3001
+      TRANSCODE_QUEUE_NAME: transcode-jobs
     depends_on:
       upload-db:
         condition: service_healthy

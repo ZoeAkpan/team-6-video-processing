@@ -1,11 +1,11 @@
 # Team 6 - Video Processing Pipeline 
 
 **Course:** COMPSCI 426  
-**Team:** Anne-Colombe Sinkpon, Duyen Tran, Zoë Akpan, Jihyun Kim, Nishil Adina, Gabriella Wang, Jahnavi Sharma
-**System:** Video Processing Pipeline
-**Repository:** [GitHub URL — public fork of https://github.com/umass-cs-426/starter-project] --> Group repo = https://github.com/ZoeAkpan/team-6-video-processing
+**Team:** Anne-Colombe Sinkpon, Duyen Tran, Zoë Akpan, Jihyun Kim, Nishil Adina, Gabriella Wang, Jahnavi Sharma  
+**System:** Video Processing Pipeline  
+**Repository:** GitHub URL — public fork of https://github.com/umass-cs-426/starter-project --> Group repo = https://github.com/ZoeAkpan/team-6-video-processing 
 
----
+![flowchart](flowchart.png)
 
 ## Team and Service Ownership
 
@@ -15,11 +15,11 @@
 |  Duyen Tran           | [`catalog-service`]                           |
 |  Zoë Akpan            | [`upload-service`, `thumbnail-worker`(can help out)]|
 |  Jihyun Kim           | [`quota-service`]                             |
-|  Nishil Adina         | [`quota-service`, `playback-service`]         |
+|  Nishil Adina         | [`moderation-worker`, `playback-service`]     |
 |  Gabriella Wang       | [`search-index-worker`]                       |
 |  Jahnavi Sharma       | [`catalog-service` ]                          |
-|  Robert Winfield      | [`transcode-worker`, `moderation-worker`]     |
-|  Sebastian Vaskes Pimentel | [`playback-service`, `moderation-worker`]|
+|  Robert Winfield      | [`transcode-worker`]                          |
+|  Sebastian Vaskes Pimentel | [`playback-service`]                     |
 
 
 > Ownership is verified by `git log --author`. Each person must have meaningful commits in the directories they claim.

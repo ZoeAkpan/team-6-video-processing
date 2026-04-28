@@ -32,7 +32,6 @@ CREATE TABLE IF NOT EXISTS video (
     original_filename TEXT         NOT NULL,
     duration_seconds  INTEGER      NOT NULL CHECK (duration_seconds > 0),
     status            video_status NOT NULL DEFAULT 'processing',
-    metadata          JSONB        NOT NULL DEFAULT '{}'::jsonb,
     uploaded_at       TIMESTAMPTZ  NOT NULL,
     created_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
     updated_at        TIMESTAMPTZ  NOT NULL DEFAULT NOW()
