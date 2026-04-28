@@ -218,6 +218,58 @@ app.post("/mod-result", async (req, res) => {
   
 })
 
+app.post("/thumbnail", async (req, res) => {
+  console.log(`got a request to add a thumbnail for a video`)
+  // error checking: make sure the request body has the necessary fields
+  const expectedFields = ["fileHash", "thumbnailUrl", "timestampSeconds"]
+  if (!expectedFields.every((field) => field in req.body)) {
+    console.log("invalid request body, returning 400")
+    return res.status(400).json({
+      error:
+        'missing fields from request body: fileHash, thumbnailUrl, and timestampSeconds',
+    })
+  }
+
+  const { fileHash, thumbnailUrl, timestampSeconds } = req.body
+  console.log(`file hash is ${fileHash}`)
+
+  // make sure this fileHash IS already in the catalog db (should never have to worry about this)
+  const rows = await pool.query(
+    `SELECT 1 FROM video WHERE file_hash = $1`,
+    [fileHash]
+  )
+  if (rows.length === 0) {
+    console.log("no videos in catalog db with that file hash")
+    return res.status(401).json({
+      error: 'no video with that file hash found in catalog',
+    })
+  }
+
+  // add this thumbnail to thumbnail table
+  try {
+    await pool.query(
+      `
+        INSERT INTO thumbnail (file_hash, thumbnail_url, timestamp_seconds)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (file_hash, timestamp_seconds)
+        DO UPDATE SET thumbnail_url = EXCLUDED.thumbnail_url
+      `,
+      [fileHash, thumbnailUrl, timestampSeconds]
+    )
+
+    console.log("thumbnail added to database")
+    return res.status(200).json({
+      message: "thumbnail added to database",
+    })
+  } catch (err) {
+    console.error(`error updating database: ${err.message}`)
+    return res.status(500).json({
+      error: `database error: ${err.message}`,
+    })
+  }
+  
+})
+
 app.get("/videos", async (req, res) => {
   try {
     const cached = await redisClient.get("catalog:videos:available");
