@@ -5,6 +5,7 @@ const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
 const QUEUE_NAME = 'transcode-jobs';
 const DEAD_LETTER_QUEUE_NAME = 'transcode-dead-letter';
 const PORT = Number(process.env.PORT || 3004);
+const VIDEO_PROCESSING_RATE = 1; // seconds of processing time per second of video duration
 
 const app = express();
 const client = redis.createClient({ url: redisUrl });
@@ -63,46 +64,46 @@ app.get('/health', async (req, res) => {
     res.status(healthy ? 200 : 503).json(body);
 });
 
-async function saveJobStatus(jobId, updates) {
-    const key = `job:${jobId}`;
+async function saveJobStatus(fileHash, updates) {
+    const key = `job:${fileHash}`;
     await queueClient.hSet(key, updates);
     await queueClient.expire(key, 24 * 60 * 60); // set to expire after 1 day
 }
 
 async function processJob(job) {
-    const key = `job:${job.jobId}`;
+    const key = `job:${job.fileHash}`;
     const existing = await queueClient.hGetAll(key);
 
     if (!existing || Object.keys(existing).length === 0) {
-        console.error(`Job record missing in Redis for ${job.jobId}, skipping`);
+        console.error(`Job record missing in Redis for ${job.fileHash}, skipping`);
         return;
     }
 
     if (existing.status === 'complete') {
-        console.log(`job=${job.jobId} already complete, skipping`);
+        console.log(`job=${job.fileHash} already complete, skipping`);
         return;
     }
 
     if (existing.status === 'processing') {
-        console.log(`job=${job.jobId} already processing, skipping`);
+        console.log(`job=${job.fileHash} already processing, skipping`);
         return;
     }
 
     const startedAt = new Date().toISOString();
-    await saveJobStatus(job.jobId, {
+    await saveJobStatus(job.fileHash, {
         status: 'processing',
         startedAt,
         updatedAt: startedAt,
     });
 
     // Sleep proportional to video duration
-    const duration = parseInt(job.metadata.duration, 10);
-    console.log(`job ${job.jobId} processing for ${duration}s`);
-    await new Promise((resolve) => setTimeout(resolve, duration * 1000));
-    console.log(`job ${job.jobId} processing complete`);
+    const duration = parseInt(job.duration, 10);
+    console.log(`job ${job.fileHash} processing for ${duration}s`);
+    await new Promise((resolve) => setTimeout(resolve, duration * VIDEO_PROCESSING_RATE * 1000));
+    console.log(`job ${job.fileHash} processing complete`);
 
     const finishedAt = new Date().toISOString();
-    await saveJobStatus(job.jobId, {
+    await saveJobStatus(job.fileHash, {
         status: 'complete',
         updatedAt: finishedAt,
         finishedAt,
@@ -111,19 +112,17 @@ async function processJob(job) {
     await queueClient.set('transcode:lastJobAt', finishedAt);
 
     await client.publish('transcode-complete', JSON.stringify({
-        jobId: job.jobId,
-        videoId: job.videoId,
+        fileHash: job.fileHash,
         originalFilename: job.originalFilename,
         contentType: job.contentType,
         fileSizeBytes: job.fileSizeBytes,
         uploadedBy: job.uploadedBy,
-        metadata: job.metadata,
         status: 'complete',
+        duration: job.duration,
         updatedAt: finishedAt,
-        finishedAt,
     }));
 
-    console.log(`job=${job.jobId} status=complete`);
+    console.log(`job=${job.fileHash} status=complete`);
 }
 
 async function loop() {
@@ -143,25 +142,19 @@ async function loop() {
             continue;
         }
 
-        if (!job || !job.jobId) {
-            console.error('Invalid or missing jobId in payload', parsed);
+        if (!job || !job.fileHash) {
+            console.error('Invalid or missing fileHash in payload', parsed);
             continue;
         }
 
-        if (!job.videoId ||
-            !job.originalFilename || 
+        if (!job.originalFilename || 
             !job.contentType || 
             !job.fileSizeBytes || 
-            !job.uploadedBy || 
-            !job.metadata        
+            !job.uploadedBy ||
+            !job.duration ||
+            !job.fileHash 
         ) {
             console.error('Invalid transcode job payload: missing required fields', job);
-            await queueClient.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
-            continue;
-        }
-
-        if (!job.metadata.duration) {
-            console.error('Invalid transcode job payload: missing duration in metadata', job);
             await queueClient.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
             continue;
         }
@@ -170,13 +163,13 @@ async function loop() {
             await processJob(job);
         } catch (err) {
             const updatedAt = new Date().toISOString();
-            if (job && job.jobId) {
-                await saveJobStatus(job.jobId, {
+            if (job && job.fileHash) {
+                await saveJobStatus(job.fileHash, {
                     status: 'failed',
                     updatedAt,
                     error: err.message,
                 });
-                console.error(`job=${job.jobId} status=failed error=${err.message}`);
+                console.error(`job=${job.fileHash} status=failed error=${err.message}`);
             } else {
                 console.error(`unhandled worker error with invalid job payload: ${err.message}`);
             }
