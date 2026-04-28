@@ -83,7 +83,7 @@ app.get("/health", async (req, res) => {
     await redisClient.ping();
     health.dlq_depth = await redisClient.lLen(DLQ_KEY);
     const last = await redisClient.get("catalog: last_procesed_at");
-    health.last_processed_at = lat || null;
+    health.last_processed_at = last || null;
   } catch (err) {
     health.status = "unhealthy";
     health.redis = "error: " + err.message;
