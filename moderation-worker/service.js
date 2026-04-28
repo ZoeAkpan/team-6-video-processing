@@ -12,6 +12,9 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
 const TRANSCODE_COMPLETE_EVENT = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode-complete'
 const VIDEO_REJECTED_EVENT = process.env.VIDEO_REJECTED_CHANNEL || 'video-rejected'
 const MODERATION_PASS_RATE = Number(process.env.MODERATION_PASS_RATE || 0.8)
+const DLQ_NAME = "moderation-worker:dlq"
+const LAST_JOB = "moderation-worker:last_job"
+const JOB_COUNT = "moderation-worker:jobs_completed"
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -64,8 +67,13 @@ async function getHealthSnapshot() {
   }
 
   if (redisStatus === "ok") {
-    const lastJobTime = await redis.get("moderation-worker_last_completed_job_time")
-    response.body.lastJobCompletedAt = lastJobTime ? lastJobTime : "no completed jobs"
+    const numJobsCompleted = Number(await redis.get(JOB_COUNT) || "0")
+    const lastJobInfo = await redis.hGetAll(LAST_JOB) || {}
+    const dlqLength = await redis.lLen(DLQ_NAME)
+
+    response.body.numJobsCompleted = numJobsCompleted
+    response.body.lastJobInfo = numJobsCompleted > 0 ? lastJobInfo : "no completed jobs"
+    response.body.dlqLength = dlqLength
   }
 
   return response
@@ -76,15 +84,96 @@ app.get('/health', async (_req, res) => {
   return res.status(snapshot.healthy ? 200 : 503).json(snapshot.body)
 })
 
+app.get('/dlq', async (_req, res) => {
+  try {
+    const length = await redis.lLen(DLQ_NAME)
+    const items = await redis.lRange(DLQ_NAME, 0, -1)
+
+    return res.status(200).json({
+      queue: DLQ_NAME,
+      length,
+      items: items.map((item, index) => ({
+        index,
+        entry: JSON.parse(item),
+      }))
+    })
+  } catch (err) {
+    console.error('Failed to read DLQ:', err.message)
+    return res.status(500).json({ error: 'internal_server_error' })
+  }
+})
+
 app.use((_req, res) => {
   return res.status(404).json({
     error: 'not found',
   })
 })
 
-function isValidPayload(raw) {
-  // will check for poison pills (malformed data) in sprint 3
-  return true // just return true for now
+function getValidPayload(raw) {
+  // returns parsed JSON if valid, error message if not 
+  try {
+    const payload = JSON.parse(raw)
+
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Payload must be a plain object");
+    }
+
+    const allowedKeys = [
+      "originalFileName",
+      "contentType",
+      "fileSizeBytes",
+      "uploadedBy",
+      "fileHash",
+      "duration",
+      "status",
+      "updatedAt"
+    ]
+
+    const keys = Object.keys(payload);
+
+    // Check for missing keys
+    for (const key of allowedKeys) {
+      if (!keys.includes(key)) {
+        throw new Error(`Missing field: ${key}`);
+      }
+    }
+
+    // Check for extra keys
+    for (const key of keys) {
+      if (!allowedKeys.includes(key)) {
+        throw new Error(`Unexpected field: ${key}`);
+      }
+    }
+
+    // capture just what we need (discard "status" and "updatedAt")
+    const {
+      originalFileName,
+      contentType,
+      fileSizeBytes,
+      uploadedBy,
+      fileHash,
+      duration,
+    } = payload
+
+    return {
+      valid: true,
+      video: {
+        originalFileName,
+        contentType,
+        fileSizeBytes,
+        uploadedBy,
+        fileHash,
+        duration,
+      }
+    }
+
+  } catch (err) {
+    return {
+      valid: false,
+      error: err.message,
+      raw
+    }
+  }
 }
 
 function simulateContentReview(videoData) {
@@ -98,9 +187,9 @@ function simulateContentReview(videoData) {
 }
 
 async function handleTranscodeComplete(rawMessage) {
-  console.log(`Received ${TRANSCODE_COMPLETE_EVENT} with payload: ${rawMessage}`)
+  console.log(`\n\n\nReceived ${TRANSCODE_COMPLETE_EVENT} with payload: ${rawMessage}`)
 
-  // expected payload format:
+  // expected rawMessage format:
   // {
   //   "originalFilename": "demo.mp4",
   //   "contentType": "video/mp4",
@@ -112,14 +201,23 @@ async function handleTranscodeComplete(rawMessage) {
   //   "updatedAt": "2026-04-27T19:16:00.000Z"
   // }
 
+  const result = getValidPayload(rawMessage)
 
-  if (!isValidPayload(rawMessage)) {
-    // poison pill handling
-    // will be done in sprint 3
+  if (!result.valid) {
+    // invalid payload, add to DLQ
+    console.log(`Payload is invalid: ${result.error}, adding to DLQ`)
+    const dlqEntry = {
+      error: result.error,
+      raw: result.raw
+    }
+    await redis.lPush(DLQ_NAME, JSON.stringify(dlqEntry))
     return
   }
 
-  const payload = JSON.parse(rawMessage)
+  // valid payload, simulate content review and add to db
+  console.log("Payload is valid")
+
+  const payload = result.video
 
   const fileHash = payload.fileHash
   
@@ -128,11 +226,14 @@ async function handleTranscodeComplete(rawMessage) {
   await pool.query(
     `
       INSERT INTO moderation_results (
-        fileHash,
+        file_hash,
         status,
-        reason,
+        reason
       )
       VALUES ($1, $2, $3)
+      ON CONFLICT (file_hash) DO UPDATE
+      SET status = EXCLUDED.status,
+          reason = EXCLUDED.reason
     `,
     [fileHash, status, reason]
   )
@@ -154,7 +255,14 @@ async function handleTranscodeComplete(rawMessage) {
   }
 
   // mark time of last successfully processed job for health endpoint
-  await redis.set("moderation-worker_last_completed_job_time", new Date().toISOString())
+  const jobInfo = {
+    fileHash,
+    completedAt: new Date().toISOString(),
+    moderationResult: status
+  }
+
+  await redis.hSet(LAST_JOB, jobInfo)
+  await redis.incr(JOB_COUNT)
 }
 
 async function shutdown(signal) {

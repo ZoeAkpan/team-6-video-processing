@@ -488,7 +488,61 @@ curl http://localhost:3007/health
   "status": "healthy",
   "db": "ok",
   "redis": "ok",
-  "lastJobCompletedAt": "no completed jobs"
+  "numJobsCompleted": 1,
+  "lastJobInfo": {
+    "fileHash": "abc123",
+    "completedAt": "2026-04-28T03:15:59.745Z",
+    "moderationResult": "approved"
+  },
+  "dlqLength": 0
+}
+```
+
+### GET /dlq
+
+```
+GET /dlq
+
+  Returns the current contents of the moderation worker's dead-letter queue.
+  Items are added to the DLQ when a received transcode-complete message has
+  an invalid or malformed payload.
+
+  Responses:
+    200  DLQ contents returned successfully
+    500  Internal error
+```
+
+**Example request:**
+
+```bash
+curl http://localhost:3007/dlq
+```
+
+**Example response (200 — with items):**
+
+```json
+{
+  "queue": "moderation-worker:dlq",
+  "length": 1,
+  "items": [
+    {
+      "index": 0,
+      "entry": {
+        "error": "Missing field: fileHash",
+        "raw": "{\"originalFileName\":\"demo.mp4\",\"contentType\":\"video/mp4\",\"fileSizeBytes\":1000000,\"uploadedBy\":\"user-123\",\"duration\":42,\"status\":\"complete\",\"updatedAt\":\"2026-04-27T19:16:00.000Z\"}"
+      }
+    }
+  ]
+}
+```
+
+**Example response (200 — empty):**
+
+```json
+{
+  "queue": "moderation-worker:dlq",
+  "length": 0,
+  "items": []
 }
 ```
 
