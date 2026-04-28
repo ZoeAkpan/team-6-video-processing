@@ -118,8 +118,8 @@ async function processJob(job) {
         fileSizeBytes: job.fileSizeBytes,
         uploadedBy: job.uploadedBy,
         status: 'complete',
+        duration: job.duration,
         updatedAt: finishedAt,
-        finishedAt,
     }));
 
     console.log(`job=${job.fileHash} status=complete`);
