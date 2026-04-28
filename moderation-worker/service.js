@@ -84,6 +84,25 @@ app.get('/health', async (_req, res) => {
   return res.status(snapshot.healthy ? 200 : 503).json(snapshot.body)
 })
 
+app.get('/dlq', async (_req, res) => {
+  try {
+    const length = await redis.lLen(DLQ_NAME)
+    const items = await redis.lRange(DLQ_NAME, 0, -1)
+
+    return res.status(200).json({
+      queue: DLQ_NAME,
+      length,
+      items: items.map((item, index) => ({
+        index,
+        entry: JSON.parse(item),
+      }))
+    })
+  } catch (err) {
+    console.error('Failed to read DLQ:', err.message)
+    return res.status(500).json({ error: 'internal_server_error' })
+  }
+})
+
 app.use((_req, res) => {
   return res.status(404).json({
     error: 'not found',
@@ -187,7 +206,11 @@ async function handleTranscodeComplete(rawMessage) {
   if (!result.valid) {
     // invalid payload, add to DLQ
     console.log(`Payload is invalid: ${result.error}, adding to DLQ`)
-    await redis.lPush(DLQ_NAME, result.raw)
+    const dlqEntry = {
+      error: result.error,
+      raw: result.raw
+    }
+    await redis.lPush(DLQ_NAME, JSON.stringify(dlqEntry))
     return
   }
 
