@@ -248,6 +248,16 @@ async function moveToDeadLetter(raw, errorMessage) {
   )
 }
 
+// wrapper around moveToDeadLetter to ensure that we don't lose messages if Redis is having issues
+// if error is caught during moveToDeadLetter, we just log it to avoid losing the original error
+async function moveToDeadLetterSafely(raw, errorMessage) {
+  try {
+    await moveToDeadLetter(raw, errorMessage)
+  } catch (err) {
+    console.error('Failed to move message to dead letter queue:', err.message)
+  }
+}
+
 async function handleTranscodeComplete(raw) {
   let event
 
@@ -260,7 +270,7 @@ async function handleTranscodeComplete(raw) {
     )
   } catch (err) {
     console.error('Thumbnail event enqueue failed:', err.message)
-    await moveToDeadLetter(raw, err.message)
+    await moveToDeadLetterSafely(raw, err.message)
   }
 }
 
@@ -270,7 +280,7 @@ async function processQueuedEvent(raw) {
     await processTranscodeComplete(event)
   } catch (err) {
     console.error('Thumbnail event failed:', err.message)
-    await moveToDeadLetter(raw, err.message)
+    await moveToDeadLetterSafely(raw, err.message)
   } finally {
     inFlightJobId = null
   }
@@ -288,11 +298,7 @@ async function workerLoop() {
       await processQueuedEvent(raw)
     } catch (err) {
       if (shuttingDown) break
-
       console.error('Thumbnail queue processing failed:', err.message)
-      if (raw) {
-        await moveToDeadLetter(raw, err.message)
-      }
     }
   }
 }
