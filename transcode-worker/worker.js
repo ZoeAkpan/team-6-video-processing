@@ -68,14 +68,18 @@ async function processJob(job) {
 
     // Sleep proportional to video duration
     const duration = parseInt(job.duration, 10);
-    console.log(`job ${job.fileHash} processing for ${duration}s`);
-    await new Promise((resolve) => setTimeout(resolve, duration * VIDEO_PROCESSING_RATE * 1000));
+    const processingTimeSeconds = duration * VIDEO_PROCESSING_RATE
+    console.log(`job ${job.fileHash} processing for ${processingTimeSeconds}s`);
+    await new Promise((resolve) => setTimeout(resolve, processingTimeSeconds * 1000));
     console.log(`job ${job.fileHash} processing complete`);
 
+    // keep track of last completed job
     const finishedAt = new Date().toISOString();
+    await client.set('transcode:lastJobAt', finishedAt);
 
-    await queueClient.set('transcode:lastJobAt', finishedAt);
+    // add to Catalog DB
 
+    // publish transcode-complete event
     await client.publish('transcode-complete', JSON.stringify({
         fileHash: job.fileHash,
         originalFilename: job.originalFilename,
@@ -87,7 +91,7 @@ async function processJob(job) {
         updatedAt: finishedAt,
     }));
 
-    console.log(`job=${job.fileHash} status=complete`);
+    console.log(`job ${job.fileHash} status=complete`);
 }
 
 async function loop() {
@@ -103,12 +107,14 @@ async function loop() {
             parsed = JSON.parse(raw);
             job = parsed;
         } catch (err) {
-            console.error('Invalid job payload:', err.message);
+            console.error(`Invalid job payload, adding to DLQ (${err.message})`, raw);
+            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
             continue;
         }
 
         if (!job || !job.fileHash) {
-            console.error('Invalid or missing fileHash in payload', parsed);
+            console.error('Invalid or missing fileHash in payload, adding to DLQ', parsed);
+            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
             continue;
         }
 
@@ -120,24 +126,21 @@ async function loop() {
             !job.fileHash 
         ) {
             console.error('Invalid transcode job payload: missing required fields', job);
-            await queueClient.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
+            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
+            continue;
+        }
+
+        const duration = Number(job.duration)
+        if (!Number.isFinite(duration) || duration <= 0) {
+            console.error(`Invalid duration: ${job.duration}`, job);
+            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
             continue;
         }
 
         try {
             await processJob(job);
         } catch (err) {
-            const updatedAt = new Date().toISOString();
-            if (job && job.fileHash) {
-                await saveJobStatus(job.fileHash, {
-                    status: 'failed',
-                    updatedAt,
-                    error: err.message,
-                });
-                console.error(`job=${job.fileHash} status=failed error=${err.message}`);
-            } else {
-                console.error(`unhandled worker error with invalid job payload: ${err.message}`);
-            }
+            console.error(`job ${job.fileHash} processing failed with error ${err.message}`);
         }
     }
 }
