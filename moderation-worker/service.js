@@ -82,9 +82,70 @@ app.use((_req, res) => {
   })
 })
 
-function isValidPayload(raw) {
-  // will check for poison pills (malformed data) in sprint 3
-  return true // just return true for now
+function getValidPayload(raw) {
+  // returns parsed JSON if valid, error message if not 
+  try {
+    const payload = JSON.parse(raw)
+
+    const allowedKeys = [
+      "originalFileName",
+      "contentType",
+      "fileSizeBytes",
+      "uploadedBy",
+      "fileHash",
+      "duration",
+      "status",
+      "updatedAt"
+    ]
+
+    const keys = Object.keys(payload);
+
+    // Check for missing keys
+    for (const key of allowedKeys) {
+      if (!keys.includes(key)) {
+        throw new Error(`Missing field: ${key}`);
+      }
+    }
+
+    // Check for extra keys
+    for (const key of keys) {
+      if (!allowedKeys.includes(key)) {
+        throw new Error(`Unexpected field: ${key}`);
+      }
+    }
+
+    // capture just what we need (discard "status" and "updatedAt")
+    const {
+      originalFileName,
+      contentType,
+      fileSizeBytes,
+      uploadedBy,
+      fileHash,
+      duration,
+    } = payload
+
+    // save into one object
+    const video = {
+      originalFileName,
+      contentType,
+      fileSizeBytes,
+      uploadedBy,
+      fileHash,
+      duration,
+    }
+
+    return {
+      valid: true,
+      video
+    }
+
+  } catch (error) {
+    return {
+      valid: false,
+      error,
+      raw
+    }
+  }
 }
 
 function simulateContentReview(videoData) {
@@ -100,7 +161,7 @@ function simulateContentReview(videoData) {
 async function handleTranscodeComplete(rawMessage) {
   console.log(`Received ${TRANSCODE_COMPLETE_EVENT} with payload: ${rawMessage}`)
 
-  // expected payload format:
+  // expected rawMessage format:
   // {
   //   "originalFilename": "demo.mp4",
   //   "contentType": "video/mp4",
