@@ -148,18 +148,15 @@ function parseTranscodeComplete(raw) {
     throw new PoisonPillError('event payload must be an object')
   }
 
-  if (!event.videoId) {
-    throw new PoisonPillError('videoId is required')
+  if (!event.fileHash) {
+    throw new PoisonPillError('fileHash is required')
   }
 
-  if (
-    typeof event.videoId !== 'string' ||
-    !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
-      event.videoId
-    )
-  ) {
-    throw new PoisonPillError('videoId must be a valid UUID')
+  if (typeof event.fileHash !== 'string' || !event.fileHash.trim()) {
+    throw new PoisonPillError('fileHash must be a non-empty string')
   }
+
+  event.fileHash = event.fileHash.trim()
 
   if (event.jobId !== undefined && typeof event.jobId !== 'string') {
     throw new PoisonPillError('jobId must be a string when provided')
@@ -211,11 +208,13 @@ function isTransientDatabaseError(err) {
   )
 }
 
-async function ensureVideoExists(videoId) {
-  const result = await pool.query('SELECT 1 FROM video WHERE id = $1', [videoId])
+async function ensureVideoExists(fileHash) {
+  const result = await pool.query('SELECT 1 FROM video WHERE file_hash = $1', [
+    fileHash,
+  ])
 
   if (result.rowCount === 0) {
-    throw new PoisonPillError(`video does not exist: ${videoId}`)
+    throw new PoisonPillError(`video does not exist for fileHash: ${fileHash}`)
   }
 }
 
@@ -243,9 +242,9 @@ function buildThumbnailReferences(event) {
   const uniqueTimestamps = [...new Set(timestamps)]
 
   return uniqueTimestamps.map((timestampSeconds) => ({
-    videoId: event.videoId,
+    fileHash: event.fileHash,
     timestampSeconds,
-    thumbnailUrl: `/thumbnails/${event.videoId}/${timestampSeconds}.jpg`,
+    thumbnailUrl: `/thumbnails/${event.fileHash}/${timestampSeconds}.jpg`,
   }))
 }
 
@@ -258,12 +257,12 @@ async function writeThumbnailReferences(thumbnailReferences) {
     for (const thumbnail of thumbnailReferences) {
       await client.query(
         `
-          INSERT INTO thumbnail (video_id, thumbnail_url, timestamp_seconds)
+          INSERT INTO thumbnail (file_hash, thumbnail_url, timestamp_seconds)
           VALUES ($1, $2, $3)
-          ON CONFLICT (video_id, timestamp_seconds)
+          ON CONFLICT (file_hash, timestamp_seconds)
           DO UPDATE SET thumbnail_url = EXCLUDED.thumbnail_url
         `,
-        [thumbnail.videoId, thumbnail.thumbnailUrl, thumbnail.timestampSeconds]
+        [thumbnail.fileHash, thumbnail.thumbnailUrl, thumbnail.timestampSeconds]
       )
     }
 
@@ -282,14 +281,15 @@ async function writeThumbnailReferences(thumbnailReferences) {
 
 
 async function processTranscodeComplete(event) {
-  const traceId = event.jobId?.trim() || event.videoId
+  const fileHash = event.fileHash
+  const traceId = event.jobId?.trim() || fileHash
 
   // Marks which job is currently being handled, so that it 
   // can be reported in the health check 
   inFlightJobId = traceId
-  console.log(`thumbnail processing started job=${traceId} video=${event.videoId}`)
+  console.log(`thumbnail processing started job=${traceId} fileHash=${fileHash}`)
 
-  await ensureVideoExists(event.videoId)
+  await ensureVideoExists(fileHash)
 
   // Thumbnail extraction is CPU-bound, so burn CPU instead of sleeping.
   if (PROCESSING_DELAY_MS > 0) {
@@ -309,7 +309,7 @@ async function processTranscodeComplete(event) {
   )
   await writeThumbnailReferences(thumbnailReferences)
   console.log(
-    `thumbnail wrote refs job=${traceId} video=${event.videoId} count=${thumbnailReferences.length}`
+    `thumbnail wrote refs job=${traceId} fileHash=${fileHash} count=${thumbnailReferences.length}`
   )
 
   const processedAt = new Date().toISOString()
@@ -323,7 +323,7 @@ async function processTranscodeComplete(event) {
     THUMBNAIL_COMPLETE_CHANNEL,
     JSON.stringify({
       jobId: traceId,
-      videoId: event.videoId,
+      fileHash,
       status: 'complete',
       thumbnails: thumbnailReferences,
       processedAt,
@@ -332,7 +332,7 @@ async function processTranscodeComplete(event) {
   console.log(`thumbnail published complete job=${traceId}`)
 
   console.log(
-    `thumbnail job=${traceId} video=${event.videoId} refs=${thumbnailReferences.length} status=complete`
+    `thumbnail job=${traceId} fileHash=${fileHash} refs=${thumbnailReferences.length} status=complete`
   )
 }
 
@@ -368,9 +368,9 @@ async function handleTranscodeComplete(raw) {
     event = parseTranscodeComplete(raw)
     await redis.rPush(QUEUE_NAME, raw)
     const queueDepth = await redis.lLen(QUEUE_NAME)
-    const traceId = event.jobId?.trim() || event.videoId
+    const traceId = event.jobId?.trim() || event.fileHash.trim()
     console.log(
-      `thumbnail event received job=${traceId} video=${event.videoId} queued=true queueDepth=${queueDepth}`
+      `thumbnail event received job=${traceId} fileHash=${event.fileHash.trim()} queued=true queueDepth=${queueDepth}`
     )
   } catch (err) {
     console.error('Thumbnail event enqueue failed:', err.message)
@@ -387,7 +387,7 @@ async function processQueuedEvent(raw) {
 
   try {
     const event = parseTranscodeComplete(raw)
-    const traceId = event.jobId?.trim() || event.videoId
+    const traceId = event.jobId?.trim() || event.fileHash.trim()
     while (true) {
       try {
         attempts += 1
