@@ -286,19 +286,6 @@ async function moveToDeadLetter(raw, errorMessage, metadata = {}) {
   )
 }
 
-async function safelyMoveToDeadLetter(raw, errorMessage, metadata = {}) {
-  try {
-    await moveToDeadLetter(raw, errorMessage, metadata)
-    return true
-  } catch (err) {
-    console.error(
-      `Thumbnail dead-letter write failed originalError="${errorMessage}" dlqError="${err.message}"`
-    )
-    return false
-  }
-}
-
-
 async function handleTranscodeComplete(raw) {
   let event
 
@@ -309,12 +296,8 @@ async function handleTranscodeComplete(raw) {
     const fileHash = event.fileHash.trim()
     console.log(`thumbnail event received job=${fileHash} queued=true queueDepth=${queueDepth}`)
   } catch (err) {
-    console.error('Thumbnail event enqueue failed, moving to DLQ:', err.message)
-    await safelyMoveToDeadLetter(raw, err.message, {
-      failureType: err instanceof PoisonPillError ? 'poison_pill' : 'enqueue_failure',
-      attempts: 0,
-      lastErrorCode: err.code,
-    })
+    console.error('Thumbnail event enqueue failed:', err.message)
+    await moveToDeadLetter(raw, err.message)
   }
 }
 
@@ -356,11 +339,7 @@ async function processQueuedEvent(raw) {
     }
   } catch (err) {
     console.error('Thumbnail event failed:', err.message)
-    await safelyMoveToDeadLetter(raw, err.message, {
-      failureType: err instanceof PoisonPillError ? 'poison_pill' : 'processing_failure',
-      attempts,
-      lastErrorCode: err.code,
-    })
+    await moveToDeadLetter(raw, err.message)
   } finally {
     inFlightJobId = null
   }
@@ -378,16 +357,9 @@ async function workerLoop() {
       await processQueuedEvent(raw)
     } catch (err) {
       if (shuttingDown) break
-
       console.error('Thumbnail queue processing failed:', err.message)
       if (raw) {
-        await safelyMoveToDeadLetter(raw, err.message, {
-          failureType: 'queue_processing_failure',
-          lastErrorCode: err.code,
-        })
-      }
-      if (QUEUE_RETRY_DELAY_MS > 0) {
-        await sleep(QUEUE_RETRY_DELAY_MS)
+        await moveToDeadLetter(raw, err.message)
       }
     }
   }
