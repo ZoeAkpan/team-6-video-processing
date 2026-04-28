@@ -10,7 +10,7 @@ const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
 const QUEUE_NAME = process.env.THUMBNAIL_QUEUE_NAME || 'thumbnail-jobs'
 const DEAD_LETTER_QUEUE_NAME =
-  process.env.THUMBNAIL_DEAD_LETTER_QUEUE_NAME || 'thumbnail-dead-letter'
+  process.env.THUMBNAIL_DEAD_LETTER_QUEUE_NAME || 'thumbnail-jobs:dlq'
 const LAST_SUCCESS_KEY =
   process.env.THUMBNAIL_LAST_SUCCESS_KEY ||
   'thumbnail-worker:last-successfully-processed-job-at'
@@ -75,14 +75,14 @@ async function getLastSuccessfullyProcessedJobAt() {
 }
 
 async function getQueueDepths() {
-  const [queueDepth, deadLetterQueueDepth] = await Promise.all([
+  const [queueDepth, dlq_depth] = await Promise.all([
     redis.lLen(QUEUE_NAME),
     redis.lLen(DEAD_LETTER_QUEUE_NAME),
   ])
 
   return {
     queueDepth,
-    deadLetterQueueDepth,
+    dlq_depth,
   }
 }
 
@@ -90,7 +90,7 @@ async function getHealthSnapshot() {
   let db = 'ok'
   let redisStatus = 'ok'
   let queueDepth = null
-  let deadLetterQueueDepth = null
+  let dlq_depth = null
   let lastSuccessfulJobAt = null
 
   try {
@@ -107,7 +107,7 @@ async function getHealthSnapshot() {
 
     const depths = await getQueueDepths()
     queueDepth = depths.queueDepth
-    deadLetterQueueDepth = depths.deadLetterQueueDepth
+    dlq_depth = depths.dlq_depth
     lastSuccessfulJobAt = await getLastSuccessfullyProcessedJobAt()
   } catch (err) {
     redisStatus = `error: ${err.message}`
@@ -122,7 +122,7 @@ async function getHealthSnapshot() {
       db,
       redis: redisStatus,
       queueDepth,
-      deadLetterQueueDepth,
+      dlq_depth,
       lastSuccessfullyProcessedJobAt: lastSuccessfulJobAt,
       inFlightJobId,
       subscribedChannels: TRANSCODE_COMPLETE_CHANNELS,
