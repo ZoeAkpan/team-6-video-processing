@@ -13,6 +13,8 @@ const TRANSCODE_COMPLETE_EVENT = process.env.TRANSCODE_COMPLETE_CHANNEL || 'tran
 const VIDEO_REJECTED_EVENT = process.env.VIDEO_REJECTED_CHANNEL || 'video-rejected'
 const MODERATION_PASS_RATE = Number(process.env.MODERATION_PASS_RATE || 0.8)
 const DLQ_NAME = "moderation-worker:dlq"
+const LAST_JOB = "moderation-worker:last_job"
+const JOB_COUNT = "moderation-worker:jobs_completed"
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -65,8 +67,13 @@ async function getHealthSnapshot() {
   }
 
   if (redisStatus === "ok") {
-    const lastJobTime = await redis.get("moderation-worker_last_completed_job_time")
-    response.body.lastJobCompletedAt = lastJobTime ? lastJobTime : "no completed jobs"
+    const numJobsCompleted = Number(await redis.get(JOB_COUNT) || "0")
+    const lastJobInfo = await redis.hGetAll(LAST_JOB) || {}
+    const dlqLength = await redis.lLen(DLQ_NAME)
+
+    response.body.numJobsCompleted = numJobsCompleted
+    response.body.lastJobInfo = numJobsCompleted > 0 ? lastJobInfo : "no completed jobs"
+    response.body.dlqLength = dlqLength
   }
 
   return response
@@ -161,7 +168,7 @@ function simulateContentReview(videoData) {
 }
 
 async function handleTranscodeComplete(rawMessage) {
-  console.log(`Received ${TRANSCODE_COMPLETE_EVENT} with payload: ${rawMessage}`)
+  console.log(`\n\n\nReceived ${TRANSCODE_COMPLETE_EVENT} with payload: ${rawMessage}`)
 
   // expected rawMessage format:
   // {
@@ -180,7 +187,7 @@ async function handleTranscodeComplete(rawMessage) {
   if (!result.valid) {
     // invalid payload, add to DLQ
     console.log(`Payload is invalid: ${result.error}, adding to DLQ`)
-    await redis.lpush(DLQ_NAME, result.raw)
+    await redis.lPush(DLQ_NAME, result.raw)
     return
   }
 
@@ -196,11 +203,14 @@ async function handleTranscodeComplete(rawMessage) {
   await pool.query(
     `
       INSERT INTO moderation_results (
-        fileHash,
+        file_hash,
         status,
-        reason,
+        reason
       )
       VALUES ($1, $2, $3)
+      ON CONFLICT (file_hash) DO UPDATE
+      SET status = EXCLUDED.status,
+          reason = EXCLUDED.reason
     `,
     [fileHash, status, reason]
   )
@@ -222,7 +232,14 @@ async function handleTranscodeComplete(rawMessage) {
   }
 
   // mark time of last successfully processed job for health endpoint
-  await redis.set("moderation-worker_last_completed_job_time", new Date().toISOString())
+  const jobInfo = {
+    fileHash,
+    completedAt: new Date().toISOString(),
+    moderationResult: status
+  }
+
+  await redis.hSet(LAST_JOB, jobInfo)
+  await redis.incr(JOB_COUNT)
 }
 
 async function shutdown(signal) {
