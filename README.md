@@ -488,7 +488,13 @@ curl http://localhost:3007/health
   "status": "healthy",
   "db": "ok",
   "redis": "ok",
-  "lastJobCompletedAt": "no completed jobs"
+  "numJobsCompleted": 1,
+  "lastJobInfo": {
+    "fileHash": "abc123",
+    "completedAt": "2026-04-28T03:15:59.745Z",
+    "moderationResult": "approved"
+  },
+  "dlqLength": 0
 }
 ```
 
