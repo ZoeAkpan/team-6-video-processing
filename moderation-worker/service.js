@@ -87,6 +87,10 @@ function getValidPayload(raw) {
   try {
     const payload = JSON.parse(raw)
 
+    if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
+      throw new Error("Payload must be a plain object");
+    }
+
     const allowedKeys = [
       "originalFileName",
       "contentType",
@@ -124,25 +128,22 @@ function getValidPayload(raw) {
       duration,
     } = payload
 
-    // save into one object
-    const video = {
-      originalFileName,
-      contentType,
-      fileSizeBytes,
-      uploadedBy,
-      fileHash,
-      duration,
-    }
-
     return {
       valid: true,
-      video
+      video: {
+        originalFileName,
+        contentType,
+        fileSizeBytes,
+        uploadedBy,
+        fileHash,
+        duration,
+      }
     }
 
-  } catch (error) {
+  } catch (err) {
     return {
       valid: false,
-      error,
+      error: err.message,
       raw
     }
   }
