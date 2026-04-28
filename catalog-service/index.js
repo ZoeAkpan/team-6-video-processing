@@ -99,7 +99,7 @@ app.get("/health", async (req, res) => {
 });
 
 app.post("/add-video", async (req, res) => {
-
+  console.log(`got request to add a video to catalog db`)
   // error checking: make sure the request body has the necessary fields
   const expectedFields = [
     'originalFilename',
@@ -110,6 +110,7 @@ app.post("/add-video", async (req, res) => {
     'duration',
   ]
   if (!expectedFields.every((field) => field in req.body)) {
+    console.log("invalid request body, returning 400")
     return res.status(400).json({
       error:
         'missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration',
@@ -131,6 +132,7 @@ app.post("/add-video", async (req, res) => {
     [fileHash]
   )
   if (rows.length > 0) {
+    console.log("video with that file hash already exists")
     return res.status(401).json({
       error: 'video already exists in catalog, cannot reupload',
     })
@@ -145,16 +147,18 @@ app.post("/add-video", async (req, res) => {
         content_type,
         file_size_bytes,
         uploaded_by,
-        duration,
+        duration
       )
       VALUES ($1, $2, $3, $4, $5, $6)`,
       [fileHash, originalFilename, contentType, fileSizeBytes, uploadedBy, duration]
     )
 
+    console.log("added to database")
     return res.status(200).json({
       message: "upload to catalog db accepted",
     })
   } catch (err) {
+    console.error(`error adding to database: ${err.message}`)
     return res.status(500).json({
       error: `database error: ${err.message}`,
     })
