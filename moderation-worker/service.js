@@ -153,7 +153,7 @@ function simulateContentReview(videoData) {
   const status = approved ? 'approved' : 'rejected'
   const reason = approved ? 'passed_automated_review' : 'rejected_automated_review'
 
-  console.log(`Completed content review for video ${videoData.videoId}. Result: ${status}`)
+  console.log(`Completed content review for video ${videoData.fileHash}. Result: ${status}`)
   
   return [ approved, status, reason ]
 }
@@ -173,14 +173,15 @@ async function handleTranscodeComplete(rawMessage) {
   //   "updatedAt": "2026-04-27T19:16:00.000Z"
   // }
 
+  const result = getValidPayload(rawMessage)
 
-  if (!isValidPayload(rawMessage)) {
-    // poison pill handling
-    // will be done in sprint 3
+  if (!result.valid) {
+    // invalid payload, add to DLQ
     return
   }
 
-  const payload = JSON.parse(rawMessage)
+  // valid payload, simulate content review and add to db
+  const payload = result.video
 
   const fileHash = payload.fileHash
   
