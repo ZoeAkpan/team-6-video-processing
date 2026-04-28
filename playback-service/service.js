@@ -62,31 +62,30 @@ app.get('/health', async (_req, res) => {
 
 app.post('/views', async (req, res) => {
   try {
-    const { userId, videoId, positionSeconds } = req.body || {}
+    const body = req.body || {}
 
-    const normalizedUserId = typeof userId === 'string' ? userId.trim() : ''
-    const normalizedVideoId = typeof videoId === 'string' ? videoId.trim() : ''
-    const normalizedPositionSeconds = Number(positionSeconds)
+    // accept both old and new field names for compatibility
+    const rawUserId = body.userId || body.user_id || body.userID
+    const rawVideoId =
+      body.videoId || body.video_id || body.videoID || body.fileHash || body.file_hash || body.filehash
+    const rawPosition =
+      // common variants: positionSeconds, position_seconds, position, pos
+      body.positionSeconds ?? body.position_seconds ?? body.position ?? body.pos
+
+    const normalizedUserId = typeof rawUserId === 'string' ? rawUserId.trim() : ''
+    const normalizedVideoId = typeof rawVideoId === 'string' ? rawVideoId.trim() : ''
+    const normalizedPositionSeconds = Number(rawPosition)
 
     if (!normalizedUserId) {
-      return res.status(400).json({
-        error: 'userId is required',
-      })
+      return res.status(400).json({ error: 'userId is required' })
     }
 
     if (!normalizedVideoId) {
-      return res.status(400).json({
-        error: 'videoId is required',
-      })
+      return res.status(400).json({ error: 'videoId or fileHash is required' })
     }
 
-    if (
-      !Number.isFinite(normalizedPositionSeconds) ||
-      normalizedPositionSeconds < 0
-    ) {
-      return res.status(400).json({
-        error: 'positionSeconds must be a non-negative number',
-      })
+    if (!Number.isFinite(normalizedPositionSeconds) || normalizedPositionSeconds < 0) {
+      return res.status(400).json({ error: 'positionSeconds must be a non-negative number' })
     }
 
     const duplicateResult = await pool.query(
@@ -173,21 +172,34 @@ app.post('/views', async (req, res) => {
 
 app.get('/resume', async (req, res) => {
   try {
-    const normalizedUserId =
-      typeof req.query.userId === 'string' ? req.query.userId.trim() : ''
-    const normalizedVideoId =
-      typeof req.query.videoId === 'string' ? req.query.videoId.trim() : ''
+    // accept query param variants for compatibility (videoId or fileHash)
+    const rawUserId =
+      typeof req.query.userId === 'string'
+        ? req.query.userId
+        : typeof req.query.user_id === 'string'
+        ? req.query.user_id
+        : ''
+
+    const rawVideoId =
+      typeof req.query.videoId === 'string'
+        ? req.query.videoId
+        : typeof req.query.video_id === 'string'
+        ? req.query.video_id
+        : typeof req.query.fileHash === 'string'
+        ? req.query.fileHash
+        : typeof req.query.file_hash === 'string'
+        ? req.query.file_hash
+        : ''
+
+    const normalizedUserId = rawUserId.trim()
+    const normalizedVideoId = rawVideoId.trim()
 
     if (!normalizedUserId) {
-      return res.status(400).json({
-        error: 'userId is required',
-      })
+      return res.status(400).json({ error: 'userId is required' })
     }
 
     if (!normalizedVideoId) {
-      return res.status(400).json({
-        error: 'videoId is required',
-      })
+      return res.status(400).json({ error: 'videoId or fileHash is required' })
     }
 
     const result = await pool.query(
