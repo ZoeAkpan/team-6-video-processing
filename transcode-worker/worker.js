@@ -64,37 +64,7 @@ app.get('/health', async (req, res) => {
     res.status(healthy ? 200 : 503).json(body);
 });
 
-async function saveJobStatus(fileHash, updates) {
-    const key = `job:${fileHash}`;
-    await queueClient.hSet(key, updates);
-    await queueClient.expire(key, 24 * 60 * 60); // set to expire after 1 day
-}
-
 async function processJob(job) {
-    const key = `job:${job.fileHash}`;
-    const existing = await queueClient.hGetAll(key);
-
-    if (!existing || Object.keys(existing).length === 0) {
-        console.error(`Job record missing in Redis for ${job.fileHash}, skipping`);
-        return;
-    }
-
-    if (existing.status === 'complete') {
-        console.log(`job=${job.fileHash} already complete, skipping`);
-        return;
-    }
-
-    if (existing.status === 'processing') {
-        console.log(`job=${job.fileHash} already processing, skipping`);
-        return;
-    }
-
-    const startedAt = new Date().toISOString();
-    await saveJobStatus(job.fileHash, {
-        status: 'processing',
-        startedAt,
-        updatedAt: startedAt,
-    });
 
     // Sleep proportional to video duration
     const duration = parseInt(job.duration, 10);
@@ -103,11 +73,6 @@ async function processJob(job) {
     console.log(`job ${job.fileHash} processing complete`);
 
     const finishedAt = new Date().toISOString();
-    await saveJobStatus(job.fileHash, {
-        status: 'complete',
-        updatedAt: finishedAt,
-        finishedAt,
-    });
 
     await queueClient.set('transcode:lastJobAt', finishedAt);
 
