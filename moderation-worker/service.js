@@ -100,6 +100,19 @@ function simulateContentReview(videoData) {
 async function handleTranscodeComplete(rawMessage) {
   console.log(`Received ${TRANSCODE_COMPLETE_EVENT} with payload: ${rawMessage}`)
 
+  // expected payload format:
+  // {
+  //   "originalFilename": "demo.mp4",
+  //   "contentType": "video/mp4",
+  //   "fileSizeBytes": 1000000,
+  //   "uploadedBy": "user-123",
+  //   "fileHash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+  //   "duration": 1,
+  //   "status": "complete",
+  //   "updatedAt": "2026-04-27T19:16:00.000Z"
+  // }
+
+
   if (!isValidPayload(rawMessage)) {
     // poison pill handling
     // will be done in sprint 3
@@ -107,48 +120,34 @@ async function handleTranscodeComplete(rawMessage) {
   }
 
   const payload = JSON.parse(rawMessage)
-  // expected structure:
-  // {
-  //   jobId,
-  //   videoId,
-  //   status,
-  //   updatedAt,
-  //   outputFormats
-  // }
 
-  const videoId = payload.videoId
+  const fileHash = payload.fileHash
   
   const [ approved, status, reason ] = simulateContentReview(payload)
 
   await pool.query(
     `
       INSERT INTO moderation_results (
-        video_id,
+        fileHash,
         status,
         reason,
-        source_event
       )
-      VALUES ($1, $2, $3, $4::jsonb)
-      ON CONFLICT (video_id)
-      DO UPDATE SET
-        status = EXCLUDED.status,
-        reason = EXCLUDED.reason,
-        source_event = EXCLUDED.source_event,
-        moderated_at = NOW()
+      VALUES ($1, $2, $3)
     `,
-    [videoId, status, reason, JSON.stringify(payload)]
+    [fileHash, status, reason]
   )
 
-  console.log('Moderation recorded to database', { videoId, status, reason })
+  console.log('Moderation recorded to database', { fileHash, status, reason })
 
   if (!approved) {
     await redis.publish(
       VIDEO_REJECTED_EVENT,
       JSON.stringify({
-        videoId,
+        fileHash,
         status,
         reason,
         moderatedAt: new Date().toISOString(),
+        video: payload
       })
     )
     console.log(`Published ${VIDEO_REJECTED_EVENT} event`)
