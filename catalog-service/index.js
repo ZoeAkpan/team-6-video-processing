@@ -217,6 +217,9 @@ app.post("/mod-result", async (req, res) => {
       error: `database error: ${err.message}`,
     })
   }
+
+  // delete from cache if it's there
+  await redisClient.del(`video:${fileHash}`);
   
 })
 
@@ -313,24 +316,24 @@ app.get("/video/search", async (req,res) => {
   }
 })
 
-app.get("/video/:id", async (req, res) => {
-  const {id} = req.params;
+app.get("/video/:hash", async (req, res) => {
+  const {hash} = req.params;
 
   try {
-    const cached = await redisClient.get(`video:${id}`);
+    const cached = await redisClient.get(`video:${hash}`);
     if (cached) {
       try{
         const parsed = JSON.parse(cached);
-        console.log(`[cache hit] /videos/${id} served from Redis`);
+        console.log(`[cache hit] /videos/${hash} served from Redis`);
         return res.json(parsed);
       } catch (err) {
-        console.error(`[cached corruption] invalid JSON for video:${id}, deleting`);
-        await redisClient.del(`video:${id}`);
+        console.error(`[cached corruption] invalid JSON for video:${hash}, deleting`);
+        await redisClient.del(`video:${hash}`);
       }
     }
-    console.log(`[cache miss] /videos/${id} querying DB`);
+    console.log(`[cache miss] /videos/${hash} querying DB`);
     const result = await pool.query(
-      `SELECT * FROM video WHERE id = $1 AND moderation_status = 'available'`, [id]
+      `SELECT * FROM video WHERE fileHash = $1 AND moderation_status = 'available'`, [hash]
     );
 
     if (result.rows.length === 0){
@@ -338,7 +341,7 @@ app.get("/video/:id", async (req, res) => {
     }
 
     const video = result.rows[0];
-    await redisClient.set(`video:${id}`, JSON.stringify(video), {EX:60});
+    await redisClient.set(`video:${hash}`, JSON.stringify(video), {EX:60});
     res.json(video);
   } catch (err) {
     res.status(500).json({ error: err.message});
