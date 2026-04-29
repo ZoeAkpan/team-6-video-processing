@@ -289,11 +289,10 @@ services:
       - "3005:3005"
     environment:
       REDIS_URL: redis://redis:6379
-      DATABASE_URL: postgres://catalog:catalog@catalog-db:5432/catalog
       PORT: 3005
       THUMBNAIL_QUEUE_NAME: thumbnail-jobs
       THUMBNAIL_DEAD_LETTER_QUEUE_NAME: thumbnail-dead-letter
-      TRANSCODE_COMPLETE_CHANNELS: transcode-complete
+      TRANSCODE_COMPLETE_CHANNEL: transcode-complete
       THUMBNAIL_PROCESSING_DELAY_MS: 1000
     depends_on:
       catalog-db:
@@ -343,6 +342,7 @@ services:
       DATABASE_URL: postgres://user:pass@upload-db:5432/upload_db
       REDIS_URL: redis://redis:6379
       QUOTA_SERVICE_URL: http://quota-service:3001
+      TRANSCODE_QUEUE_NAME: transcode-jobs
     depends_on:
       upload-db:
         condition: service_healthy

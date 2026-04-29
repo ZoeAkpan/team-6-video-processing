@@ -9,6 +9,10 @@ const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const CHANNEL = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode-complete'
 const redis = createClient({ url: REDIS_URL })
 const subscriber = createClient({ url: REDIS_URL })
+const DLQ_NAME = "search-index-worker:dlq"
+const LAST_SUCCESSFUL_JOB = "search-index-worker:last_successful_job"
+const JOB_COUNT = "search-index-worker:jobs_completed"
+
 
 redis.on('error', (err) => console.error('Redis error:', err.message))
 subscriber.on('error', (err) => console.error('Redis subscriber error:', err.message))
@@ -18,60 +22,98 @@ app.get('/health', async (_, res) => {
     await pool.query('SELECT 1')
     await redis.ping()
 
-    res.status(200).send('ok')
+    const dlqDepth = await redis.lLen(DLQ_NAME)
+    const lastJob = await redis.get(LAST_SUCCESSFUL_JOB)
+    const totalJobs = await redis.get(JOB_COUNT)
+
+    res.status(200).json({
+      status: 'healthy',
+      dlq_depth: dlqDepth || 0,
+      last_successful_job: lastJob || 'no completed jobs',
+      jobs_completed: parseInt(totalJobs || '0', 10),
+      uptime: process.uptime()
+    })
   } catch (err) {
     console.error('Health check failed:', err.message)
-    res.status(500).send('unhealthy')
+    res.status(500).json({ status: 'unhealthy', error: err.message })
   }
 })
 
 async function handleIndexing(payload) {
-  const { video_id, title, description } = payload
+  const { 
+    fileHash, 
+    originalFilename, 
+    contentType, 
+    fileSizeBytes, 
+    uploadedBy,
+    status,
+    duration,
+    updatedAt 
+  } = payload
+
+  if (!fileHash) {
+    throw new Error('Poison Pill: Payload is missing fileHash')
+  }
   
   const query = `
-    INSERT INTO video_search_index (video_id, title, description, indexed_at)
-    VALUES ($1, $2, $3, NOW())
-    ON CONFLICT (video_id) DO UPDATE 
-    SET title = EXCLUDED.title, 
-        description = EXCLUDED.description, 
+    INSERT INTO video_search_index (
+      file_hash, 
+      original_filename, 
+      content_type, 
+      file_size_bytes, 
+      uploaded_by, 
+      status, 
+      duration, 
+      updated_at, 
+      indexed_at
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW())
+    ON CONFLICT (file_hash) DO UPDATE 
+    SET original_filename = EXCLUDED.original_filename, 
+        content_type = EXCLUDED.content_type, 
+        file_size_bytes = EXCLUDED.file_size_bytes,
+        status = EXCLUDED.status,
+        duration = EXCLUDED.duration,
+        updated_at = EXCLUDED.updated_at,
         indexed_at = NOW();
   `
+  const values = [
+    fileHash, 
+    originalFilename, 
+    contentType, 
+    fileSizeBytes, 
+    uploadedBy, 
+    status, 
+    duration, 
+    updatedAt
+  ]
 
-  await pool.query(query, [video_id, title, description])
-  console.log(`Successfully indexed video: ${video_id}`)
+  await pool.query(query, values)
 }
-
-// How to test locally for now: 
-// send a request: 
-// docker compose exec holmes redis-cli -h redis publish transcode-complete '{"video_id": "v-123", "title": "Inception", "description": "A dream within a dream"}'
-// view table: 
-// docker compose exec search-db psql -U user -d search -c "SELECT * FROM video_search_index;"
-// send another request: 
-// docker compose exec holmes redis-cli -h redis publish transcode-complete '{"video_id": "v-456", "title": "Planet Earth", "description": "A deep dive into the ocean depths."}'
-// docker compose exec holmes redis-cli -h redis publish transcode-complete '{"video_id": "v-789", "title": "Docker for Beginners", "description": "Learn how to containerize your apps."}'
-// send same request to test idempotency: 
-// docker compose exec holmes redis-cli -h redis publish transcode-complete '{"video_id": "v-123", "title": "Inception (Extended Cut)", "description": "Now with 20 minutes of extra dreams!"}'
-//logs:
-//docker compose logs -f search-index-worker
-
 
 async function startWorker() {
   console.log('Starting Search Index Worker...')
-  const subscriber = createClient({ url: REDIS_URL })
-  subscriber.on('error', (err) => console.error('Redis Client Error:', err))
 
   try {
     await redis.connect()
     await subscriber.connect()
     console.log(`Connected to Redis at ${REDIS_URL}`)
     await subscriber.subscribe(CHANNEL, async (message) => {
-    console.log(`Received message '${CHANNEL}':`, message)
+    console.log(`Receiving message from '${CHANNEL}':`, message)
       try {
         const payload = JSON.parse(message)
         await handleIndexing(payload)
+        await redis.set(LAST_SUCCESSFUL_JOB, payload.fileHash)
+        await redis.incr(JOB_COUNT)
+        console.log(`Successfully processed: ${payload.fileHash}`)
       } catch (err) {
-        console.error('Failed to parse message payload:', err.message)
-      }
+        console.error(`Failed to process, routing to DLQ: ${err.message}`)
+        const dlqPayload = {
+          originalMessage: message,
+          error: err.message,
+          failedAt: new Date().toISOString()
+        }
+        await redis.rPush(DLQ_NAME, JSON.stringify(dlqPayload))}
     })
     app.listen(PORT, () => {
       console.log(`Health check server listening on port ${PORT}`)

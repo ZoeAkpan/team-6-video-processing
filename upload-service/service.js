@@ -1,68 +1,204 @@
-// code from health endpoint section 
-
 import express from 'express'
-import crypto from 'node:crypto'
 import pg from 'pg'
 import { createClient } from 'redis'
 
 const app = express()
 const port = Number(process.env.PORT ?? 3000)
 const quotaServiceUrl = process.env.QUOTA_SERVICE_URL ?? 'http://quota-service:3001'
+const transcodeQueueName = process.env.TRANSCODE_QUEUE_NAME ?? 'transcode-jobs'
 const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 const redis = createClient({ url: process.env.REDIS_URL })
-await redis.connect()
 
 const startTime = Date.now()
+
 app.use(express.json())
 
-async function checkQuota(userId, fileSizeBytes, fileHash) {
-  const response = await fetch(`${quotaServiceUrl}/quota/check`, {
+pool.on('error', (err) => {
+  console.error(
+    JSON.stringify({
+      event: 'db_pool_error',
+      message: err.message,
+      timestamp: new Date().toISOString(),
+    })
+  )
+})
+
+redis.on('error', (err) => {
+  console.error(
+    JSON.stringify({
+      event: 'redis_error',
+      message: err.message,
+      timestamp: new Date().toISOString(),
+    })
+  )
+})
+
+function log(event, fields = {}) {
+  console.log(
+    JSON.stringify({
+      event,
+      ...fields,
+      timestamp: new Date().toISOString(),
+    })
+  )
+}
+
+function logError(event, err, fields = {}) {
+  console.error(
+    JSON.stringify({
+      event,
+      message: err.message,
+      stack: err.stack,
+      ...fields,
+      timestamp: new Date().toISOString(),
+    })
+  )
+}
+
+async function safeJson(response) {
+  try {
+    return await response.json()
+  } catch (_) {
+    return null
+  }
+}
+
+async function postJson(url, body) {
+  const response = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId, fileSizeBytes, fileHash }),
+    body: JSON.stringify(body),
   })
 
-  const payload = await response.json()
+  const payload = await safeJson(response)
 
-  if (!response.ok) {
-    const error = new Error(payload.error ?? 'quota check failed')
-    error.status = response.status
-    throw error
+  return {
+    ok: response.ok,
+    status: response.status,
+    payload,
   }
-
-  return payload
 }
 
-function normalizeHash(fileHash) {
-  return fileHash.trim().toLowerCase()
-}
-
-async function enqueueTranscodeJob(upload, metadata) {
-  const now = new Date().toISOString()
-
-  await redis.hSet(`job:${upload.id}`, {
-    status: 'queued',
-    createdAt: now,
-    updatedAt: now,
+async function checkQuota(userId, fileSizeBytes, fileHash) {
+  return postJson(`${quotaServiceUrl}/quota/check`, {
+    userId,
+    fileSizeBytes,
+    fileHash,
   })
-  await redis.expire(`job:${upload.id}`, 24 * 60 * 60)
+}
 
-  await redis.lPush('transcode-jobs', JSON.stringify({
-    jobId: upload.id,
-    videoId: upload.id,
-    originalFilename: upload.original_filename,
-    contentType: upload.content_type,
-    fileSizeBytes: Number(upload.file_size_bytes),
-    uploadedBy: upload.uploaded_by,
-    metadata,
-  }))
-} 
+async function consumeQuota(userId, fileSizeBytes, fileHash) {
+  return postJson(`${quotaServiceUrl}/quota/consume`, {
+    userId,
+    fileSizeBytes,
+    fileHash,
+  })
+}
 
-app.get('/health', async (req, res) => {
+async function releaseQuota(userId, fileHash, reason) {
+  return postJson(`${quotaServiceUrl}/quota/release`, {
+    userId,
+    fileHash,
+    reason,
+  })
+}
+
+async function enqueueTranscodeJob(uploadPayload) {
+  await redis.lPush(transcodeQueueName, JSON.stringify(uploadPayload))
+}
+
+async function getUploadByHash(fileHash) {
+  const result = await pool.query(
+    `
+    SELECT
+      file_hash AS "fileHash",
+      original_filename AS "originalFilename",
+      content_type AS "contentType",
+      file_size_bytes AS "fileSizeBytes",
+      uploaded_by AS "uploadedBy",
+      duration,
+      status,
+      quota_consumed AS "quotaConsumed",
+      error_message AS "errorMessage",
+      transcode_enqueued_at AS "transcodeEnqueuedAt",
+      created_at AS "createdAt",
+      updated_at AS "updatedAt"
+    FROM upload
+    WHERE file_hash = $1
+    `,
+    [fileHash]
+  )
+
+  return result.rows[0] ?? null
+}
+
+async function insertUpload(uploadPayload) {
+  const result = await pool.query(
+    `
+    INSERT INTO upload (
+      file_hash,
+      original_filename,
+      content_type,
+      file_size_bytes,
+      uploaded_by,
+      duration,
+      status,
+      quota_consumed,
+      error_message
+    )
+    VALUES ($1, $2, $3, $4, $5, $6, 'pending_quota', FALSE, NULL)
+    RETURNING
+      file_hash AS "fileHash",
+      original_filename AS "originalFilename",
+      content_type AS "contentType",
+      file_size_bytes AS "fileSizeBytes",
+      uploaded_by AS "uploadedBy",
+      duration,
+      status,
+      quota_consumed AS "quotaConsumed",
+      error_message AS "errorMessage",
+      transcode_enqueued_at AS "transcodeEnqueuedAt",
+      created_at AS "createdAt",
+      updated_at AS "updatedAt"
+    `,
+    [
+      uploadPayload.fileHash,
+      uploadPayload.originalFilename,
+      uploadPayload.contentType,
+      uploadPayload.fileSizeBytes,
+      uploadPayload.uploadedBy,
+      uploadPayload.duration,
+    ]
+  )
+
+  return result.rows[0]
+}
+
+async function updateUploadState(
+  fileHash,
+  { status, quotaConsumed, errorMessage, markEnqueued = false }
+) {
+  await pool.query(
+    `
+    UPDATE upload
+    SET
+      status = $2,
+      quota_consumed = $3,
+      error_message = $4,
+      transcode_enqueued_at = CASE
+        WHEN $5 THEN NOW()
+        ELSE transcode_enqueued_at
+      END
+    WHERE file_hash = $1
+    `,
+    [fileHash, status, quotaConsumed, errorMessage, markEnqueued]
+  )
+}
+
+app.get('/health', async (_req, res) => {
   const checks = {}
   let healthy = true
 
-  // Check PostgreSQL
   const dbStart = Date.now()
   try {
     await pool.query('SELECT 1')
@@ -72,7 +208,6 @@ app.get('/health', async (req, res) => {
     healthy = false
   }
 
-  // Check Redis
   const redisStart = Date.now()
   try {
     const pong = await redis.ping()
@@ -83,9 +218,35 @@ app.get('/health', async (req, res) => {
     healthy = false
   }
 
+  try {
+    const response = await fetch(`${quotaServiceUrl}/health`)
+    checks.quotaService = {
+      status: response.ok ? 'healthy' : 'unhealthy',
+      http_status: response.status,
+    }
+    if (!response.ok) {
+      healthy = false
+    }
+  } catch (err) {
+    checks.quotaService = { status: 'unhealthy', error: err.message }
+    healthy = false
+  }
+
+  try {
+    const depth = await redis.lLen(transcodeQueueName)
+    checks.transcodeQueue = {
+      status: 'healthy',
+      name: transcodeQueueName,
+      depth,
+    }
+  } catch (err) {
+    checks.transcodeQueue = { status: 'unhealthy', error: err.message }
+    healthy = false
+  }
+
   const body = {
     status: healthy ? 'healthy' : 'unhealthy',
-    service: process.env.SERVICE_NAME ?? 'unknown',
+    service: process.env.SERVICE_NAME ?? 'upload-service',
     timestamp: new Date().toISOString(),
     uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
     checks,
@@ -94,19 +255,87 @@ app.get('/health', async (req, res) => {
   res.status(healthy ? 200 : 503).json(body)
 })
 
+app.get('/upload/:fileHash', async (req, res) => {
+  try {
+    const upload = await getUploadByHash(req.params.fileHash)
+
+    if (!upload) {
+      return res.status(404).json({
+        error: 'upload_not_found',
+      })
+    }
+
+    return res.status(200).json(upload)
+  } catch (err) {
+    logError('get_upload_error', err, { fileHash: req.params.fileHash })
+    return res.status(500).json({
+      error: 'internal_server_error',
+    })
+  }
+})
+
 app.post('/upload', async (req, res) => {
+  const expectedFields = [
+    'originalFilename',
+    'contentType',
+    'fileSizeBytes',
+    'uploadedBy',
+    'fileHash',
+    'duration',
+  ]
+
+  if (!expectedFields.every((field) => field in req.body)) {
+    return res.status(400).json({
+      error:
+        'missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration',
+    })
+  }
+
   const {
     originalFilename,
     contentType,
     fileSizeBytes,
     uploadedBy,
     fileHash,
-    metadata = {},
-  } = req.body ?? {}
+    duration,
+  } = req.body
 
-  if (!originalFilename || !contentType || !uploadedBy || typeof fileSizeBytes !== 'number' || fileSizeBytes <= 0) {
+  const uploadPayload = {
+    originalFilename,
+    contentType,
+    fileSizeBytes,
+    uploadedBy,
+    fileHash,
+    duration,
+  }
+
+  if (typeof originalFilename !== 'string' || !originalFilename.trim()) {
     return res.status(400).json({
-      error: 'originalFilename, contentType, uploadedBy, and positive numeric fileSizeBytes are required',
+      error: 'originalFilename must be a non-empty string',
+    })
+  }
+
+  if (typeof contentType !== 'string' || !contentType.trim()) {
+    return res.status(400).json({
+      error: 'contentType must be a non-empty string',
+    })
+  }
+
+  if (!Number.isInteger(fileSizeBytes) || fileSizeBytes <= 0) {
+    return res.status(400).json({
+      error: 'fileSizeBytes must be a positive integer',
+    })
+  }
+
+  if (typeof uploadedBy !== 'string' || !uploadedBy.trim()) {
+    return res.status(400).json({
+      error: 'uploadedBy must be a non-empty string',
+    })
+  }
+
+  if (typeof duration !== 'number' || Number.isNaN(duration) || duration <= 0) {
+    return res.status(400).json({
+      error: 'duration must be a positive number',
     })
   }
 
@@ -116,88 +345,193 @@ app.post('/upload', async (req, res) => {
     })
   }
 
-  const uploadFileHash = normalizeHash(fileHash)
-
   try {
-    const existingUpload = await pool.query(
-      'SELECT * FROM upload WHERE file_hash = $1',
-      [uploadFileHash]
-    )
+    const existing = await getUploadByHash(fileHash)
 
-    if (existingUpload.rowCount > 0) {
+    if (existing) {
       return res.status(200).json({
-        message: 'Upload already exists',
-        upload: existingUpload.rows[0],
-        idempotent: true,
+        message: 'An upload with this file hash already exists',
+        duplicate: true,
+        fileHash,
+        upload: existing,
       })
     }
 
-    const quota = await checkQuota(uploadedBy, fileSizeBytes, uploadFileHash)
+    const quota = await checkQuota(uploadedBy, fileSizeBytes, fileHash)
 
-    if (!quota.allowed) {
+    if (!quota.ok) {
+      return res.status(quota.status >= 500 ? 503 : quota.status).json({
+        error: 'quota check failed',
+        details: quota.payload,
+      })
+    }
+
+    if (!quota.payload.allowed) {
       return res.status(403).json({
         error: 'Upload blocked by quota service',
-        quota,
+        quota: quota.payload,
+        upload: uploadPayload,
       })
     }
 
-    const storageKey = `uploads/${Date.now()}-${originalFilename}`
-    const uploadId = crypto.randomUUID()
-    const { rows } = await pool.query(
-      `INSERT INTO upload (
-        id,
-        original_filename,
-        storage_key,
-        file_hash,
-        content_type,
-        file_size_bytes,
-        uploaded_by,
-        status,
-        metadata
-      )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-      ON CONFLICT (file_hash) DO NOTHING
-      RETURNING *`,
-      [
-        uploadId,
-        originalFilename,
-        storageKey,
-        uploadFileHash,
-        contentType,
-        fileSizeBytes,
-        uploadedBy,
-        'pending',
-        JSON.stringify(metadata),
-      ]
-    )
+    try {
+      await insertUpload(uploadPayload)
+    } catch (err) {
+      if (err.code === '23505') {
+        const duplicate = await getUploadByHash(fileHash)
+        return res.status(200).json({
+          message: 'An upload with this file hash already exists',
+          duplicate: true,
+          fileHash,
+          upload: duplicate,
+        })
+      }
+      throw err
+    }
 
-    if (rows.length === 0) {
-      const duplicate = await pool.query(
-        'SELECT * FROM upload WHERE file_hash = $1',
-        [uploadFileHash]
-      )
+    const quotaConsumption = await consumeQuota(uploadedBy, fileSizeBytes, fileHash)
 
-      return res.status(200).json({
-        message: 'Upload already exists',
-        upload: duplicate.rows[0],
-        idempotent: true,
+    if (!quotaConsumption.ok) {
+      await updateUploadState(fileHash, {
+        status: 'quota_failed',
+        quotaConsumed: false,
+        errorMessage: `quota consume failed: ${
+          quotaConsumption.payload?.reason ??
+          quotaConsumption.payload?.error ??
+          quotaConsumption.status
+        }`,
+      })
+
+      return res.status(quotaConsumption.status === 409 ? 403 : 503).json({
+        error: 'quota consume failed',
+        details: quotaConsumption.payload,
+        upload: await getUploadByHash(fileHash),
       })
     }
 
-    await enqueueTranscodeJob(rows[0], metadata)
+    try {
+      await enqueueTranscodeJob(uploadPayload)
+    } catch (queueErr) {
+      let quotaRelease
+
+      try {
+        quotaRelease = await releaseQuota(
+          uploadedBy,
+          fileHash,
+          'queue_enqueue_failed'
+        )
+      } catch (releaseErr) {
+        quotaRelease = {
+          ok: false,
+          status: 503,
+          payload: { error: releaseErr.message },
+        }
+      }
+
+      const quotaReleased =
+        quotaRelease.ok &&
+        (quotaRelease.payload?.released === true ||
+          quotaRelease.payload?.idempotentReplay === true)
+
+      await updateUploadState(fileHash, {
+        status: quotaReleased
+          ? 'queue_failed_refunded'
+          : 'queue_failed_refund_pending',
+        quotaConsumed: !quotaReleased,
+        errorMessage: quotaReleased
+          ? `queue push failed: ${queueErr.message}`
+          : `queue push failed and quota release failed: ${queueErr.message}`,
+      })
+
+      return res.status(503).json({
+        error: 'failed to enqueue transcode job',
+        quotaReleased,
+        releaseDetails: quotaRelease.payload,
+        upload: await getUploadByHash(fileHash),
+      })
+    }
+
+    await updateUploadState(fileHash, {
+      status: 'queued',
+      quotaConsumed: true,
+      errorMessage: null,
+      markEnqueued: true,
+    })
+
+    try {
+      await redis.set(`upload:${fileHash}`, '1')
+    } catch (cacheErr) {
+      logError('upload_cache_set_error', cacheErr, { fileHash })
+    }
 
     return res.status(201).json({
       message: 'Upload accepted',
-      upload: rows[0],
-      quota,
+      duplicate: false,
+      upload: await getUploadByHash(fileHash),
+      quota: quota.payload,
+      quotaConsumption: quotaConsumption.payload,
     })
   } catch (err) {
+    logError('upload_error', err, { fileHash, uploadedBy })
+
     return res.status(err.status ?? 500).json({
       error: err.message ?? 'Upload failed',
     })
   }
 })
 
-app.listen(port, () => {
-  console.log(`upload-service listening on port ${port}`)
+app.use((err, _req, res, _next) => {
+  if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+    return res.status(400).json({
+      error: 'invalid_json',
+    })
+  }
+
+  logError('unhandled_error', err)
+
+  return res.status(500).json({
+    error: 'internal_server_error',
+  })
 })
+
+async function start() {
+  try {
+    await pool.query('SELECT 1')
+    await redis.connect()
+
+    app.listen(port, () => {
+      log('upload_service_started', {
+        port,
+        queueName: transcodeQueueName,
+      })
+    })
+  } catch (err) {
+    logError('startup_error', err)
+    process.exit(1)
+  }
+}
+
+async function shutdown(signal) {
+  log('shutdown_started', { signal })
+
+  try {
+    if (redis.isOpen) {
+      await redis.quit()
+    }
+  } catch (err) {
+    logError('redis_shutdown_error', err)
+  }
+
+  try {
+    await pool.end()
+  } catch (err) {
+    logError('db_shutdown_error', err)
+  }
+
+  process.exit(0)
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'))
+process.on('SIGTERM', () => shutdown('SIGTERM'))
+
+start()
