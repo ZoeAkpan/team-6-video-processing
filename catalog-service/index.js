@@ -198,14 +198,16 @@ app.post("/mod-result", async (req, res) => {
     })
   }
 
+  const videoStatus = status === "rejected" ? "unavailable" : "available"
+
   // update video's moderation status
   try {
     await pool.query(
       `UPDATE video SET moderation_status = $1, updated_at = NOW() WHERE file_hash = $2`,
-      [status, fileHash]
+      [videoStatus, fileHash]
     )
 
-    console.log(`moderation status set in database to ${status}`)
+    console.log(`moderation status set in database to ${videoStatus}`)
     return res.status(200).json({
       message: "moderation status recorded",
     })
