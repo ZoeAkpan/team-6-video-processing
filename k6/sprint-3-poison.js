@@ -168,6 +168,112 @@ function parseJson(body) {
   }
 }
 
+function readDlqDepth(healthBody) {
+  if (!healthBody) return null;
+  return healthBody.dlq_depth ?? healthBody.deadLetterQueueDepth ?? null;
+}
+
+function readQueueDepth(healthBody) {
+  if (!healthBody) return null;
+  return healthBody.queue_depth ?? healthBody.queueDepth ?? null;
+}
+
+function sendValidUpload(label = "valid") {
+  const res = http.post(UPLOAD_URL, JSON.stringify(validPayload(label)), {
+    headers: { "Content-Type": "application/json" },
+    tags: { endpoint: "upload", type: "valid", label },
+  });
+
+  // Check for either 201 Created or 200 OK, as the service might 
+  // return 200 for idempotent re-uploads
+  const ok = check(res, {
+    "valid upload accepted": (r) => r.status === 201 || r.status === 200,
+    "valid upload has upload object": (r) => {
+      const body = parseJson(r.body);
+      return !!body?.upload;
+    },
+  });
+
+  uploadSuccessRate.add(ok);
+
+  if (ok) {
+    uploadsAccepted.add(1);
+  } else {
+    uploadsRejected.add(1);
+  }
+
+  return ok;
+}
+
+function sendEdgePoison() {
+  // Randomly select one of the edge poison pills to send
+  const pill = edgePoisonPills[Math.floor(Math.random() * edgePoisonPills.length)];
+  const body = pill.raw ?? JSON.stringify(pill.body);
+
+  const res = http.post(UPLOAD_URL, body, {
+    headers: { "Content-Type": "application/json" },
+    tags: { endpoint: "upload", type: "edge_poison", label: pill.label },
+  });
+
+  const rejected = check(res, {
+    [`edge poison [${pill.label}] rejected`]: (r) =>
+      r.status === 400 || r.status === 403,
+  });
+
+  if (rejected) {
+    edgePoisonRejected.add(1);
+  } else {
+    edgePoisonAccepted.add(1);
+  }
+}
+
+async function injectWorkerPoison() {
+  // Randomly select one of the worker poison pills to inject
+  const pill =
+    workerPoisonPills[Math.floor(Math.random() * workerPoisonPills.length)];
+  const body = pill.raw ?? JSON.stringify(pill.body);
+
+  try {
+    // Push the poison pill directly to the transcode queue in Redis
+    await redisClient.rpush(TRANSCODE_QUEUE, body);
+    workerPoisonInjected.add(1);
+    redisPoisonInjectionRate.add(true);
+
+    check(true, {
+      [`worker poison [${pill.label}] pushed to transcode queue`]: (v) => v,
+    });
+
+    return true;
+  } catch (err) {
+    workerPoisonInjectionFailed.add(1);
+    redisPoisonInjectionRate.add(false);
+    console.error(`failed to inject worker poison pill [${pill.label}]: ${err}`);
+    return false;
+  }
+}
+
+function getWorkerHealth() {
+  const res = http.get(WORKER_HEALTH_URL, {
+    tags: { endpoint: "transcode_worker_health" },
+  });
+  const body = parseJson(res.body);
+
+  const healthy = res.status === 200 && body?.status === "healthy";
+  workerHealthRate.add(healthy);
+
+  check(res, {
+    "transcode worker health endpoint is healthy": () => healthy,
+  });
+
+  return {
+    status: res.status,
+    body,
+    healthy,
+    dlqDepth: readDlqDepth(body),
+    queueDepth: readQueueDepth(body),
+  };
+}
+
 // ── Main test function ─────────────────────────────────────────────────────────
 
 export default function () {
