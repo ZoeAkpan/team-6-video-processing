@@ -8,8 +8,6 @@
 
 ## What We Built
 
-[What failure scenarios does the system now handle? Which queues have DLQ handling? What happens when a poison pill is injected?]
-
 All worker queues have dead letter queue handling. Messages that failed processing are routed to a DLQ rather than crashing or blocking a queue. The thumbnail, moderation, and search index workers validate incoming events and also move poison pills to appropriate DLQs. All worker health endpoints expose dlq_depth. Catalog service retries failed events before sending to its DLQ and helps to protect the Redis cache against messed-up JSON objects. Upload service has idempotency by fileHash and involves synchronization with quota before enqueuing transcode jobs. 
 
 ---
@@ -56,7 +54,7 @@ Moderation Worker health before injection:
 
 ```bash
 docker compose exec holmes bash
-curl -s "http://moderation-worker:3007/health"
+curl -s "http://moderation-worker:3007/health" | jq
 ```
 
 ```json
