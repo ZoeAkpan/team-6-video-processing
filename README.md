@@ -155,19 +155,185 @@ curl http://localhost:3002/videos
 > Results are cached in Redis for 60 seconds (`catalog:videos:available`). Cache is invalidated automatically when a video is marked unavailable via the `video.rejected` pub/sub event.
 ---
 
+### POST /add-video
+ 
+```
+POST /add-video
+ 
+  Adds a video record to the catalog database. Called internally by the
+  transcode-worker after a video has been successfully processed. If a video
+  with the same fileHash already exists, the request is rejected.
+ 
+  Responses:
+    200  Video added to catalog successfully
+    400  Missing or invalid request body fields
+    401  Video with that fileHash already exists
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost:3002/add-video \
+  -H "Content-Type: application/json" \
+  -d '{
+    "originalFilename": "demo.mp4",
+    "contentType": "video/mp4",
+    "fileSizeBytes": 1000000,
+    "uploadedBy": "user-123",
+    "fileHash": "abc123",
+    "duration": 42
+  }'
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "upload to catalog db accepted"
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration"
+}
+```
+ 
+**Example response (401):**
+ 
+```json
+{
+  "error": "video already exists in catalog, cannot reupload"
+}
+```
+ 
+---
+ 
+### POST /mod-result
+ 
+```
+POST /mod-result
+ 
+  Updates the moderation status of an existing video in the catalog database.
+  Called internally by the moderation-worker after a moderation decision has
+  been made. The video must already exist in the catalog.
+ 
+  Responses:
+    200  Moderation status updated successfully
+    400  Missing or invalid request body fields
+    401  No video with that fileHash found in catalog
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost:3002/mod-result \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fileHash": "abc123",
+    "status": "approved"
+  }'
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "moderation status recorded"
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing fields from request body: fileHash and status"
+}
+```
+ 
+**Example response (401):**
+ 
+```json
+{
+  "error": "no video with that file hash found in catalog"
+}
+```
+ 
+---
+ 
+### POST /thumbnail
+ 
+```
+POST /thumbnail
+ 
+  Adds or updates a thumbnail entry for an existing video in the catalog
+  database. Called internally by the thumbnail-worker. If a thumbnail already
+  exists for the same fileHash and timestampSeconds, its URL is updated.
+  The video must already exist in the catalog.
+ 
+  Responses:
+    200  Thumbnail added or updated successfully
+    400  Missing or invalid request body fields
+    401  No video with that fileHash found in catalog
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost:3002/thumbnail \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fileHash": "abc123",
+    "thumbnailUrl": "https://example.com/thumbnails/abc123-5.jpg",
+    "timestampSeconds": "5"
+  }'
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "thumbnail added to database"
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing fields from request body: fileHash, thumbnailUrl, and timestampSeconds"
+}
+```
+ 
+**Example response (401):**
+ 
+```json
+{
+  "error": "no video with that file hash found in catalog"
+}
+```
+ 
+
 ## upload-service
 
 ### GET /health
 
-```
-GET /health
+**Method and path:** `GET /health`
 
-  Returns the health status of the upload service, PostgreSQL, and Redis.
+**Description:** Returns the health status of the upload service, PostgreSQL,
+and Redis.
 
-  Responses:
-    200  Service and dependencies healthy
-    503  One or more dependencies unreachable
-```
+**Responses:**
+
+| Status | Meaning |
+| ------ | ------- |
+| 200 | Service and dependencies healthy |
+| 503 | One or more dependencies unreachable |
 
 **Example request:**
 
@@ -181,9 +347,11 @@ curl http://localhost:3000/health
 {
   "status": "healthy",
   "service": "upload-service",
+  "timestamp": "2026-04-27T18:21:00.000Z",
+  "uptime_seconds": 42,
   "checks": {
-    "database": { "status": "healthy" },
-    "redis": { "status": "healthy" }
+    "database": { "status": "healthy", "latency_ms": 2 },
+    "redis": { "status": "healthy", "latency_ms": 1 }
   }
 }
 ```
@@ -192,24 +360,34 @@ curl http://localhost:3000/health
 
 ### POST /upload
 
-```
-POST /upload
+**Method and path:** `POST /upload`
 
-  Sends an upload request to the upload service. The request must include a
-  `fileHash`. The service first makes a Redis-backed idempotency check for that
-  file hash. If the file hash already exists, the existing upload record is
-  returned. Otherwise, it makes a synchronous HTTP call to
-  quota-service at POST /quota/check. If the quota check passes, the upload
-  record is inserted into the upload database, a job is pushed to the Redis
-  transcode queue, and a call is made to POST /quota/consume to update the user's quota limits.
+**Description:** Sends an upload request to the upload service. The endpoint is
+idempotent by `fileHash`: if the hash already exists, the existing upload is
+returned. New uploads synchronously call `quota-service` at `POST /quota/check`;
+if quota allows the upload, the service writes the upload record and pushes a
+job to the Redis `transcode-jobs` queue.
 
-  Responses:
-    201  Upload accepted and saved
-    200  Matching file hash already exists
-    400  Missing or invalid request body fields
-    403  Upload blocked by quota service
-    500  Internal error
-```
+**Request body:**
+
+| Field | Type | Required | Meaning |
+| ----- | ---- | -------- | ------- |
+| `originalFilename` | string | required | Original uploaded file name |
+| `contentType` | string | required | MIME type for the file, such as `video/mp4` |
+| `fileSizeBytes` | number | required | File size in bytes; must be greater than `0` |
+| `uploadedBy` | string | required | User or account identifier for the uploader |
+| `fileHash` | string | required | Hash used for idempotency and duplicate detection |
+| `metadata` | object | optional | Extra upload metadata; defaults to `{}` |
+
+**Responses:**
+
+| Status | Meaning |
+| ------ | ------- |
+| 201 | Upload accepted and saved |
+| 200 | Matching `fileHash` already exists; existing upload returned |
+| 400 | Missing or invalid request body fields |
+| 403 | Upload blocked by quota service |
+| 500 | Internal error |
 
 **Example request:**
 
@@ -232,12 +410,57 @@ curl -X POST http://localhost:3000/upload \
 {
   "message": "Upload accepted",
   "upload": {
+    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
     "original_filename": "demo.mp4",
-    "status": "pending"
+    "storage_key": "uploads/1777314060000-demo.mp4",
+    "file_hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    "content_type": "video/mp4",
+    "file_size_bytes": "1000000",
+    "uploaded_by": "user-123",
+    "status": "pending",
+    "error_message": null,
+    "metadata": { "title": "Demo", "duration": "1" },
+    "created_at": "2026-04-27T18:21:00.000Z",
+    "updated_at": "2026-04-27T18:21:00.000Z",
+    "processing_started_at": null,
+    "processing_completed_at": null
   },
   "quota": {
     "allowed": true,
-    "reason": "ok"
+    "reason": "ok",
+    "userId": "user-123",
+    "requestedFileSizeBytes": 1000000,
+    "uploadCount": 0,
+    "uploadLimitCount": 10,
+    "remainingUploadSlots": 10,
+    "storageUsedBytes": 0,
+    "storageLimitBytes": 1073741824,
+    "remainingBytes": 1073741824
+  }
+}
+```
+
+**Example response (200, duplicate fileHash):**
+
+```json
+{
+  "message": "Upload already exists",
+  "idempotent": true,
+  "upload": {
+    "id": "7a8c9d4f-7648-4f8f-94f0-4455347aa101",
+    "original_filename": "demo.mp4",
+    "storage_key": "uploads/1777314060000-demo.mp4",
+    "file_hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+    "content_type": "video/mp4",
+    "file_size_bytes": "1000000",
+    "uploaded_by": "user-123",
+    "status": "pending",
+    "error_message": null,
+    "metadata": { "title": "Demo", "duration": "1" },
+    "created_at": "2026-04-27T18:21:00.000Z",
+    "updated_at": "2026-04-27T18:21:00.000Z",
+    "processing_started_at": null,
+    "processing_completed_at": null
   }
 }
 ```
@@ -458,6 +681,52 @@ curl "http://localhost:3003/resume?userId=user-123&videoId=video-456"
   "error": "resume position not found",
   "userId": "user-123",
   "videoId": "video-456"
+}
+```
+
+## thumbnail-worker
+
+### GET /health
+
+**Method and path:** `GET /health`
+
+**Description:** Returns the health status of the thumbnail worker, PostgreSQL,
+Redis, queue depth, dead letter queue depth, and the timestamp of the last
+successfully processed thumbnail job. The worker listens for `transcode-complete`
+Redis pub/sub events, validates the event payload, enqueues valid messages onto
+`thumbnail-jobs`, writes simulated thumbnail references to the catalog database,
+clears the catalog cache, and publishes `thumbnail.complete` after successful
+processing.
+
+Malformed messages and messages that reference a missing catalog video are
+treated as poison pills and moved to `thumbnail-dead-letter`. 
+
+**Responses:**
+
+| Status | Meaning |
+| ------ | ------- |
+| 200 | Worker and dependencies healthy |
+| 503 | PostgreSQL or Redis unhealthy |
+
+**Example request:**
+
+```bash
+curl http://localhost:3005/health
+```
+
+**Example response (200):**
+
+```json
+{
+  "status": "healthy",
+  "db": "ok",
+  "redis": "ok",
+  "queueDepth": 0,
+  "deadLetterQueueDepth": 3,
+  "lastSuccessfullyProcessedJobAt": "2026-04-27T18:20:00.000Z",
+  "inFlightJobId": null,
+  "subscribedChannels": ["transcode-complete"],
+  "timestamp": "2026-04-27T18:21:00.000Z"
 }
 ```
 
