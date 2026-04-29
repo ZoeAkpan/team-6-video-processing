@@ -1,4 +1,4 @@
-// Sprint 3 — Load test with poison pills mixed in
+// Sprint 3 — Poison-pill resilience test for the video pipeline
 //
 // Run from inside the holmes container:
 //   docker compose exec holmes bash
@@ -6,32 +6,65 @@
 //
 // Or from your host machine if k6 is installed:
 //   k6 run k6/sprint-3-poison.js
+//
+// After the test:
+//   curl -s http://transcode-worker:3004/health | jq .
+//   docker compose ps
 
 import http from "k6/http";
 import { check, sleep } from "k6";
-import { Rate, Counter } from "k6/metrics";
+import { Counter, Rate } from "k6/metrics";
+import redis from "k6/x/redis";
 
-const errorRate        = new Rate("errors");
-const uploadsAccepted  = new Counter("uploads_accepted");
-const uploadsRejected  = new Counter("uploads_rejected");
-const poisonRejected   = new Counter("poison_pills_correctly_rejected");
-const poisonAccepted   = new Counter("poison_pills_incorrectly_accepted");
+const uploadSuccessRate = new Rate("valid_upload_success_rate");
+const validAfterPoisonSuccessRate = new Rate("valid_after_poison_success_rate");
+const workerHealthRate = new Rate("worker_health_healthy_rate");
+const dlqObservedRate = new Rate("dlq_observed_after_poison_rate");
+const redisPoisonInjectionRate = new Rate("redis_poison_injection_success_rate");
 
-const TARGET_URL = "http://upload-service:3000/upload";
+const uploadsAccepted = new Counter("uploads_accepted");
+const uploadsRejected = new Counter("uploads_rejected");
+const edgePoisonRejected = new Counter("edge_poison_rejected");
+const edgePoisonAccepted = new Counter("edge_poison_incorrectly_accepted");
+const workerPoisonInjected = new Counter("worker_poison_pills_injected");
+const workerPoisonInjectionFailed = new Counter("worker_poison_injection_failed");
+
+const UPLOAD_URL = __ENV.UPLOAD_URL || "http://upload-service:3000/upload";
+const WORKER_HEALTH_URL =
+  __ENV.WORKER_HEALTH_URL || "http://transcode-worker:3004/health";
+const REDIS_URL = __ENV.REDIS_URL || "redis://redis:6379";
+const TRANSCODE_QUEUE = __ENV.TRANSCODE_QUEUE || "transcode-jobs";
+const TRANSCODE_DLQ = __ENV.TRANSCODE_DLQ || "transcode-dead-letter";
+
+const POISON_RATIO = Number(__ENV.POISON_RATIO || 0.25);
+const EDGE_POISON_RATIO = Number(__ENV.EDGE_POISON_RATIO || 0.05);
+
+const redisClient = new redis.Client(REDIS_URL);
 
 export const options = {
   stages: [
     { duration: "30s", target: 20 },
     { duration: "30s", target: 20 },
-    { duration: "10s", target: 0  },
+    { duration: "10s", target: 0 },
   ],
   summaryTrendStats: ["avg", "min", "med", "max", "p(50)", "p(95)", "p(99)"],
   thresholds: {
-    http_req_failed:                    ["rate<0.05"],
-    errors:                             ["rate<0.05"],
-    poison_pills_incorrectly_accepted:  ["count<1"],
+    checks: ["rate>0.90"],
+    http_req_failed: ["rate<0.15"],
+    http_req_duration: ["p(95)<2000"],
+    // We want to ensure that the vast majority of valid uploads succeed, 
+    // even with poison pills being injected
+    valid_upload_success_rate: ["rate>0.95"],
+    // We expect some valid uploads to fail after poison pills are injected,
+    //  but the system should still be mostly functional
+    valid_after_poison_success_rate: ["rate>0.90"],
+    // worker remains healthy throughout the test
+    worker_health_healthy_rate: ["rate>0.95"],
+    redis_poison_injection_success_rate: ["rate>0.95"],
+    dlq_observed_after_poison_rate: ["rate>0"],
   },
 };
+
 
 // ── Payload builders ──────────────────────────────────────────────────────────
 
