@@ -287,7 +287,7 @@ app.get("/videos", async (req, res) => {
 
     console.log("[cache miss] /videos querying DB");
     const result = await pool.query(
-      `SELECT * FROM video WHERE status = 'available' ORDER BY created_at DESC`
+      `SELECT * FROM video WHERE moderation_status = 'available' ORDER BY created_at DESC`
     );
     await redisClient.setEx("catalog:videos:available", 60, JSON.stringify(result.rows));
     res.json(result.rows);
@@ -304,7 +304,7 @@ app.get("/video/search", async (req,res) => {
     }
 
     const result = await pool.query(
-      `SELECT * FROM video WHERE title ILIKE $1 AND status = 'available' ORDER BY created_at DESC`, [`%${q}%`]
+      `SELECT * FROM video WHERE title LIKE $1 AND moderation_status = 'available' ORDER BY created_at DESC`, [`%${q}%`]
     );
 
     res.json(result.rows);
@@ -312,34 +312,6 @@ app.get("/video/search", async (req,res) => {
     res.status(500).json({ error: err.message});
   }
 })
-async function handleRejection(message, attempt = 1) {
-  try {
-    const parsed = JSON.parse(message);
-    const { fileHash } = parsed;
-    if (!fileHash) throw new Error("missing fileHash");
-
-    await pool.query(
-      `UPDATE video SET status = 'unavailable' WHERE file_hash = $1`,
-      [fileHash]
-    );
-    await redisClient.del("catalog:videos:available");
-    console.log(`[moderation-sub] marked video ${fileHash} as unavailable`);
-  } catch (err) {
-    if (attempt < 3) {
-      const delay = Math.pow(2, attempt) * 100;
-      console.warn(`[moderation-sub] retry ${attempt}/3 in ${delay}ms — ${err.message}`);
-      await new Promise((r) => setTimeout(r, delay));
-      return handleRejection(message, attempt + 1);
-    }
-    console.error(`[moderation-sub] sending to DLQ after 3 attempts — ${err.message}`);
-    await redisClient.lPush(
-      DLQ_KEY,
-      JSON.stringify({ message, error: err.message, at: new Date().toISOString() })
-    );
-  }
-}
-
-redisSub.subscribe("video-rejected", (message) => handleRejection(message));
 
 app.get("/video/:id", async (req, res) => {
   const {id} = req.params;
@@ -358,7 +330,7 @@ app.get("/video/:id", async (req, res) => {
     }
     console.log(`[cache miss] /videos/${id} querying DB`);
     const result = await pool.query(
-      `SELECT * FROM video WHERE id = $1 AND status = 'available'`, [id]
+      `SELECT * FROM video WHERE id = $1 AND moderation_status = 'available'`, [id]
     );
 
     if (result.rows.length === 0){
