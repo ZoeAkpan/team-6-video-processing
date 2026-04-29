@@ -1,37 +1,23 @@
 import express from 'express'
-import pg from 'pg'
 import { createClient } from 'redis'
 
-const { Pool } = pg
 const app = express()
 
-
 const PORT = Number(process.env.PORT || 3005)
-const DATABASE_URL = process.env.DATABASE_URL
 const REDIS_URL = process.env.REDIS_URL || 'redis://redis:6379'
 const QUEUE_NAME = process.env.THUMBNAIL_QUEUE_NAME || 'thumbnail-jobs'
-const DEAD_LETTER_QUEUE_NAME =
-  process.env.THUMBNAIL_DEAD_LETTER_QUEUE_NAME || 'thumbnail-dead-letter'
-const LAST_SUCCESS_KEY =
-  process.env.THUMBNAIL_LAST_SUCCESS_KEY ||
-  'thumbnail-worker:last-successfully-processed-job-at'
-const THUMBNAIL_COMPLETE_CHANNEL =
-  process.env.THUMBNAIL_COMPLETE_CHANNEL || 'thumbnail.complete'
-const TRANSCODE_COMPLETE_CHANNELS = (
-  process.env.TRANSCODE_COMPLETE_CHANNELS ||
-  process.env.TRANSCODE_COMPLETE_CHANNEL ||
-  'transcode-complete,transcode.complete'
-)
-  .split(',')
-  .map((channel) => channel.trim())
-  .filter(Boolean)
+const DEAD_LETTER_QUEUE_NAME = process.env.THUMBNAIL_DEAD_LETTER_QUEUE_NAME || 'thumbnail-jobs:dlq'
+const LAST_SUCCESS_KEY = process.env.THUMBNAIL_LAST_SUCCESS_KEY || 'thumbnail-worker:last-successfully-processed-job-at'
+const THUMBNAIL_COMPLETE_CHANNEL = process.env.THUMBNAIL_COMPLETE_CHANNEL || 'thumbnail.complete'
+const TRANSCODE_COMPLETE_CHANNEL = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode-complete'
+const THUMBNAIL_SAVE_TO_CATALOG_ENDPOINT = "http://catalog-service:3002/thumbnail"
 
 const PROCESSING_DELAY_MS = Number(process.env.THUMBNAIL_PROCESSING_DELAY_MS || 250)
 const CATALOG_CACHE_KEY = process.env.CATALOG_CACHE_KEY || 'catalog:videos:available'
+const MAX_DB_RETRY_ATTEMPTS = Number(process.env.THUMBNAIL_DB_RETRY_ATTEMPTS || 3)
+const DB_RETRY_BASE_DELAY_MS = Number(process.env.THUMBNAIL_DB_RETRY_BASE_DELAY_MS || 500)
+const QUEUE_RETRY_DELAY_MS = Number(process.env.THUMBNAIL_QUEUE_RETRY_DELAY_MS || 1000)
 
-const pool = new Pool({
-  connectionString: DATABASE_URL,
-})
 const redis = createClient({ url: REDIS_URL })
 const subscriber = createClient({ url: REDIS_URL })
 const workerRedis = createClient({ url: REDIS_URL })
@@ -39,6 +25,13 @@ const workerRedis = createClient({ url: REDIS_URL })
 let lastSuccessfullyProcessedJobAt = null
 let inFlightJobId = null
 let shuttingDown = false
+
+class PoisonPillError extends Error {
+  constructor(message) {
+    super(message)
+    this.name = 'PoisonPillError'
+  }
+}
 
 redis.on('error', (err) => {
   console.error('Thumbnail worker Redis error:', err.message)
@@ -62,29 +55,22 @@ async function getLastSuccessfullyProcessedJobAt() {
 }
 
 async function getQueueDepths() {
-  const [queueDepth, deadLetterQueueDepth] = await Promise.all([
+  const [queueDepth, dlq_depth] = await Promise.all([
     redis.lLen(QUEUE_NAME),
     redis.lLen(DEAD_LETTER_QUEUE_NAME),
   ])
 
   return {
     queueDepth,
-    deadLetterQueueDepth,
+    dlq_depth,
   }
 }
 
 async function getHealthSnapshot() {
-  let db = 'ok'
   let redisStatus = 'ok'
   let queueDepth = null
-  let deadLetterQueueDepth = null
+  let dlq_depth = null
   let lastSuccessfulJobAt = null
-
-  try {
-    await pool.query('SELECT 1')
-  } catch (err) {
-    db = `error: ${err.message}`
-  }
 
   try {
     const pong = await redis.ping()
@@ -94,25 +80,24 @@ async function getHealthSnapshot() {
 
     const depths = await getQueueDepths()
     queueDepth = depths.queueDepth
-    deadLetterQueueDepth = depths.deadLetterQueueDepth
+    dlq_depth = depths.dlq_depth
     lastSuccessfulJobAt = await getLastSuccessfullyProcessedJobAt()
   } catch (err) {
     redisStatus = `error: ${err.message}`
   }
 
-  const healthy = db === 'ok' && redisStatus === 'ok'
+  const healthy = redisStatus === 'ok'
 
   return {
     healthy,
     body: {
       status: healthy ? 'healthy' : 'unhealthy',
-      db,
       redis: redisStatus,
       queueDepth,
-      deadLetterQueueDepth,
+      dlq_depth,
       lastSuccessfullyProcessedJobAt: lastSuccessfulJobAt,
       inFlightJobId,
-      subscribedChannels: TRANSCODE_COMPLETE_CHANNELS,
+      subscribedChannels: TRANSCODE_COMPLETE_CHANNEL,
       timestamp: new Date().toISOString(),
     },
   }
@@ -121,25 +106,84 @@ async function getHealthSnapshot() {
 function parseTranscodeComplete(raw) {
   let event
 
+  if (typeof raw !== 'string' || !raw.trim()) {
+    throw new PoisonPillError('event payload must be non-empty JSON')
+  }
+
   try {
     event = JSON.parse(raw)
   } catch (err) {
-    throw new Error(`invalid json: ${err.message}`)
+    throw new PoisonPillError(`invalid json: ${err.message}`)
   }
 
   if (!event || typeof event !== 'object') {
-    throw new Error('event payload must be an object')
+    throw new PoisonPillError('event payload must be an object')
   }
 
-  if (!event.jobId || !event.videoId) {
-    throw new Error('jobId and videoId are required')
+  if (!event.fileHash) {
+    throw new PoisonPillError('fileHash is required')
+  }
+
+  if (typeof event.fileHash !== 'string' || !event.fileHash.trim()) {
+    throw new PoisonPillError('fileHash must be a non-empty string')
+  }
+
+  event.fileHash = event.fileHash.trim()
+
+  if (event.jobId !== undefined && typeof event.jobId !== 'string') {
+    throw new PoisonPillError('jobId must be a string when provided')
   }
 
   return event
 }
+
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function burnCpu(ms) {
+  const deadline = Date.now() + ms
+  let x = Math.random()
+
+  while (Date.now() < deadline) {
+    x = Math.sqrt(x * x + 1.3) / 1.00001
+  }
+
+  return x
+}
+
+function withJitter(baseMs, fractionOfBase = 0.2) {
+  const variance = baseMs * fractionOfBase
+  return Math.max(1, baseMs + (Math.random() * 2 - 1) * variance)
+}
+
+function isTransientDatabaseError(err) {
+  const transientCodes = new Set([
+    '40001', // serialization_failure
+    '40P01', // deadlock_detected
+    '53300', // too_many_connections
+    '53400', // configuration_limit_exceeded
+    '57P01', // admin_shutdown
+    '57P02', // crash_shutdown
+    '57P03', // cannot_connect_now
+    '58000', // system_error
+    '58030', // io_error
+  ])
+
+  return (
+    err?.code?.startsWith?.('08') ||
+    transientCodes.has(err?.code) ||
+    ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'EPIPE'].includes(
+      err?.code
+    )
+  )
+}
+
 // figure out the video duration 
 function getDurationSeconds(event) {
-  const rawDuration = event.metadata?.duration ?? event.durationSeconds ?? 30
+  const rawDuration =
+    event.metadata?.duration ?? event.duration ?? event.durationSeconds ?? 30
   const duration = Number.parseInt(rawDuration, 10)
 
   if (!Number.isFinite(duration) || duration <= 0) {
@@ -160,58 +204,53 @@ function buildThumbnailReferences(event) {
   const uniqueTimestamps = [...new Set(timestamps)]
 
   return uniqueTimestamps.map((timestampSeconds) => ({
-    videoId: event.videoId,
+    fileHash: event.fileHash,
     timestampSeconds,
-    thumbnailUrl: `/thumbnails/${event.videoId}/${timestampSeconds}.jpg`,
+    thumbnailUrl: `/thumbnails/${event.fileHash}/${timestampSeconds}.jpg`,
   }))
 }
 
 async function writeThumbnailReferences(thumbnailReferences) {
-  const client = await pool.connect()
 
-  try {
-    await client.query('BEGIN')
+  console.log(`writing ${thumbnailReferences.length} thumbnails to catalog service`)
+  for (const thumbnailObj of thumbnailReferences) {
+    // save each thumbnail to catalog db
+    console.log("sending a thumbnail to catalog service")
+    const catalogRes = await fetch(THUMBNAIL_SAVE_TO_CATALOG_ENDPOINT, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(thumbnailObj),
+    });
 
-    for (const thumbnail of thumbnailReferences) {
-      await client.query(
-        `
-          INSERT INTO thumbnail (video_id, thumbnail_url, timestamp_seconds)
-          VALUES ($1, $2, $3)
-          ON CONFLICT (video_id, timestamp_seconds)
-          DO UPDATE SET thumbnail_url = EXCLUDED.thumbnail_url
-        `,
-        [thumbnail.videoId, thumbnail.thumbnailUrl, thumbnail.timestampSeconds]
-      )
-    }
-
-    await client.query('COMMIT')
-  } catch (err) {
-    await client.query('ROLLBACK')
-    throw err
-  } finally {
-    client.release()
+    const catalogBody = await catalogRes.json().catch(() => null);
+    console.log("catalog db response:", catalogRes.status, JSON.stringify(catalogBody));
   }
+  
 }
 
+
 async function processTranscodeComplete(event) {
+  const fileHash = event.fileHash
+
   // Marks which job is currently being handled, so that it 
   // can be reported in the health check 
-  inFlightJobId = event.jobId
-  console.log(`thumbnail processing started job=${event.jobId} video=${event.videoId}`)
+  inFlightJobId = fileHash
+  console.log(`thumbnail processing started on job with fileHash=${fileHash}`)
 
-  // Simulate time taken to process the thumbnail job.
+  // Thumbnail extraction is CPU-bound, so burn CPU instead of sleeping.
   if (PROCESSING_DELAY_MS > 0) {
-    await new Promise((resolve) => setTimeout(resolve, PROCESSING_DELAY_MS))
+    const processingMs = withJitter(PROCESSING_DELAY_MS)
+    console.log(`thumbnail extracting simulated cpu job=${fileHash} baseCpuMs=${PROCESSING_DELAY_MS} actualCpuMs=${Math.round(processingMs)}`)
+    const cpuResult = burnCpu(processingMs)
+    if (!Number.isFinite(cpuResult)) {
+      console.warn(`thumbnail cpu simulation produced invalid result job=${fileHash}`)
+    }
   }
 
   const thumbnailReferences = buildThumbnailReferences(event)
-  console.log(
-    `thumbnail extracting simulated refs job=${event.jobId} count=${thumbnailReferences.length}`
-  )
+  console.log(`thumbnail extracting simulated refs job=${fileHash} count=${thumbnailReferences.length}`)
   await writeThumbnailReferences(thumbnailReferences)
-  console.log(
-    `thumbnail wrote refs job=${event.jobId} video=${event.videoId} count=${thumbnailReferences.length}`
-  )
+  console.log(`thumbnail wrote refs job=${fileHash} fileHash=${fileHash} count=${thumbnailReferences.length}`)
 
   const processedAt = new Date().toISOString()
   lastSuccessfullyProcessedJobAt = processedAt
@@ -223,30 +262,42 @@ async function processTranscodeComplete(event) {
   await redis.publish(
     THUMBNAIL_COMPLETE_CHANNEL,
     JSON.stringify({
-      jobId: event.jobId,
-      videoId: event.videoId,
+      jobId: fileHash,
+      fileHash,
       status: 'complete',
       thumbnails: thumbnailReferences,
       processedAt,
     })
   )
-  console.log(`thumbnail published complete job=${event.jobId}`)
+  console.log(`thumbnail published complete job=${fileHash}`)
 
-  console.log(
-    `thumbnail job=${event.jobId} video=${event.videoId} refs=${thumbnailReferences.length} status=complete`
-  )
+  console.log(`thumbnail job=${fileHash} refs=${thumbnailReferences.length} status=complete`)
 }
 
-async function moveToDeadLetter(raw, errorMessage) {
+async function moveToDeadLetter(raw, errorMessage, metadata = {}) {
   await redis.lPush(
     DEAD_LETTER_QUEUE_NAME,
     JSON.stringify({
       raw,
       error: errorMessage,
+      ...metadata,
       failedAt: new Date().toISOString(),
     })
   )
 }
+
+async function safelyMoveToDeadLetter(raw, errorMessage, metadata = {}) {
+  try {
+    await moveToDeadLetter(raw, errorMessage, metadata)
+    return true
+  } catch (err) {
+    console.error(
+      `Thumbnail dead-letter write failed originalError="${errorMessage}" dlqError="${err.message}"`
+    )
+    return false
+  }
+}
+
 
 async function handleTranscodeComplete(raw) {
   let event
@@ -255,22 +306,61 @@ async function handleTranscodeComplete(raw) {
     event = parseTranscodeComplete(raw)
     await redis.rPush(QUEUE_NAME, raw)
     const queueDepth = await redis.lLen(QUEUE_NAME)
-    console.log(
-      `thumbnail event received job=${event.jobId} video=${event.videoId} queued=true queueDepth=${queueDepth}`
-    )
+    const fileHash = event.fileHash.trim()
+    console.log(`thumbnail event received job=${fileHash} queued=true queueDepth=${queueDepth}`)
   } catch (err) {
-    console.error('Thumbnail event enqueue failed:', err.message)
-    await moveToDeadLetter(raw, err.message)
+    console.error('Thumbnail event enqueue failed, moving to DLQ:', err.message)
+    await safelyMoveToDeadLetter(raw, err.message, {
+      failureType: err instanceof PoisonPillError ? 'poison_pill' : 'enqueue_failure',
+      attempts: 0,
+      lastErrorCode: err.code,
+    })
   }
 }
 
 async function processQueuedEvent(raw) {
+  let attempts = 0
+
   try {
     const event = parseTranscodeComplete(raw)
-    await processTranscodeComplete(event)
+    const fileHash = event.fileHash.trim()
+    while (true) {
+      try {
+        attempts += 1
+        await processTranscodeComplete(event)
+        return
+      } catch (err) {
+        if (err instanceof PoisonPillError) {
+          throw err
+        } else {
+          console.error(`error while processing: ${err.message}`)
+        }
+
+        if (!isTransientDatabaseError(err) || attempts >= MAX_DB_RETRY_ATTEMPTS) {
+          await safelyMoveToDeadLetter(raw, err.message, {
+            failureType: isTransientDatabaseError(err)
+              ? 'temporary_db_failure'
+              : 'processing_failure',
+            attempts,
+            lastErrorCode: err.code,
+          })
+          return
+        }
+
+        const delayMs = DB_RETRY_BASE_DELAY_MS * attempts
+        console.warn(
+          `thumbnail temporary db failure job=${fileHash} attempt=${attempts}/${MAX_DB_RETRY_ATTEMPTS} retryInMs=${delayMs}: ${err.message}`
+        )
+        await sleep(delayMs)
+      }
+    }
   } catch (err) {
     console.error('Thumbnail event failed:', err.message)
-    await moveToDeadLetter(raw, err.message)
+    await safelyMoveToDeadLetter(raw, err.message, {
+      failureType: err instanceof PoisonPillError ? 'poison_pill' : 'processing_failure',
+      attempts,
+      lastErrorCode: err.code,
+    })
   } finally {
     inFlightJobId = null
   }
@@ -291,15 +381,29 @@ async function workerLoop() {
 
       console.error('Thumbnail queue processing failed:', err.message)
       if (raw) {
-        await moveToDeadLetter(raw, err.message)
+        await safelyMoveToDeadLetter(raw, err.message, {
+          failureType: 'queue_processing_failure',
+          lastErrorCode: err.code,
+        })
+      }
+      if (QUEUE_RETRY_DELAY_MS > 0) {
+        await sleep(QUEUE_RETRY_DELAY_MS)
       }
     }
   }
 }
 
 app.get('/health', async (_req, res) => {
-  const snapshot = await getHealthSnapshot()
-  return res.status(snapshot.healthy ? 200 : 503).json(snapshot.body)
+  try {
+    const snapshot = await getHealthSnapshot()
+    return res.status(snapshot.healthy ? 200 : 503).json(snapshot.body)
+  } catch (err) {
+    return res.status(503).json({
+      status: 'unhealthy',
+      error: err.message,
+      timestamp: new Date().toISOString(),
+    })
+  }
 })
 
 app.use((_req, res) => {
@@ -336,12 +440,6 @@ async function shutdown(signal) {
     console.error('Error while closing Redis client:', err.message)
   }
 
-  try {
-    await pool.end()
-  } catch (err) {
-    console.error('Error while closing Postgres pool:', err.message)
-  }
-
   process.exit(0)
 }
 
@@ -353,16 +451,13 @@ async function start() {
     await redis.connect()
     await subscriber.connect()
     await workerRedis.connect()
-    await pool.query('SELECT 1')
     await getLastSuccessfullyProcessedJobAt()
 
-    await subscriber.subscribe(TRANSCODE_COMPLETE_CHANNELS, handleTranscodeComplete)
+    await subscriber.subscribe(TRANSCODE_COMPLETE_CHANNEL, handleTranscodeComplete)
 
     app.listen(PORT, () => {
       console.log(`thumbnail-worker listening on port ${PORT}`)
-      console.log(
-        `thumbnail-worker subscribed to ${TRANSCODE_COMPLETE_CHANNELS.join(', ')}`
-      )
+      console.log(`thumbnail-worker subscribed to ${TRANSCODE_COMPLETE_CHANNEL}`)
       console.log(`thumbnail-worker consuming queue ${QUEUE_NAME}`)
     })
 

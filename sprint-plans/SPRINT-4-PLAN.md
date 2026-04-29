@@ -1,4 +1,4 @@
-# Sprint 4 Plan — [Team Name]
+# Sprint 4 Plan — Team 6 
 
 **Sprint:** 4 — Replication, Scaling, and Polish  
 **Dates:** 04.28 → 05.07  
@@ -10,38 +10,75 @@
 
 [Which services will you replicate? What is the exact `--scale` command? What polish work remains?]
 
+We need to replicate at least three services, so we’ve chosen to replicate the catalog, upload, and quota services. There are going to be 3 commands:
+docker compose up --scale upload-service=(some number here)
+docker compose up --scale quota-service=(some number here)
+docker compose up --scale catalog-service=(some number here)
+where Caddy should ultimately discover the replicas. We are planning to clean up the code by strengthening variable names, organizing and adding information to the README.md, removing unnecessary code, and testing to ensure all workers/services work. 
+
 ---
 
 ## Ownership
 
 | Team Member | Files / Directories Owned This Sprint |
 | ----------- | ------------------------------------- |
-| [Name]      | `[path]` |
-| [Name]      | `[path]` |
-| [Name]      | `[path]` |
+| [Anne-Colombe Sinkpon]      | `/upload-service`, `/thumbnail-worker` |
+| [Duyen Tran]      | `catalog-service` |
+| [Gabriella Wang]      | `search-index-worker` |
+| [Jihyun Kim]      | `quota-service/` |
+| [Zoë Akpan] | `upload-service` | 
 
 ---
 
 ## Tasks
 
-### [Name]
+### [Anne-Colombe Sinkpon]
 
-- [ ] ...
+- [ ] add load balancer service for upload traffic
+- [ ] add replica-identifying logs to upload-service
+- [ ] clean up upload service and thumbnail worker by improving var names
+- [ ] change up code if necessary to match project requirements
 
-### [Name]
+### [Duyen Tran]
 
-- [ ] ...
+- [ ] Add Caddy in front of catalog-service
+- [ ] Update compose.yml for scaling
+- [ ] Update README.md for scaling
+- [ ] Polish catalog-service/index.js 
 
-### [Name]
+### [Zoë Akpan]
 
-- [ ] ...
+- [ ] Add Caddy for quota service as a load balancer (scale this)
+- [ ] Remove any commented out code
+- [ ] Remove any random comments or unhelpful logging 
+
+
+
+### [Gabriella Wang]
+
+- [ ] Update README.md with search-index-worker health endpoint
+- [ ] Test and debug worker pipeline to ensure smooth bridge from transcode-worker to search-index-worker
+
+### Jihyun Kim
+
+- [ ] Verify `quota-service` is stateless and safe for replication: all quota state lives in Postgres/Redis and no in-memory state affects correctness across replicas
+- [ ] Validate `POST /quota/check`, `POST /quota/consume`, and `POST /quota/release` under concurrent requests so duplicate uploads do not double-consume quota
+- [ ] Test the replicated upload path against shared quota state and confirm quota counts/storage usage remain correct when multiple replicas are running
+- [ ] Update any quota-related `compose.yml` settings, environment variables, and healthchecks needed for replication/scaling
+
+### [Robert Winfield]
+
+- [ ] Add Caddy load balancing for transcode-worker
+- [ ] Update README.md to describe scaling capabilities
+- [ ] Strengthen testing for transcode module
 
 ---
 
 ## Risks
-
+Since this is the last sprint we are going to do, there might not be enough time to finish everything, including polishing up the code and making sure it looks nice for the presentation. 
 ---
 
 ## Definition of Done
 
 `docker compose up --scale [service]=3` starts successfully. `docker compose ps` shows all replicas as `(healthy)`. k6 scaling comparison shows measurable improvement. Replica failure test shows no dropped requests.
+

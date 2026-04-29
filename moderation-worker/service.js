@@ -15,6 +15,7 @@ const MODERATION_PASS_RATE = Number(process.env.MODERATION_PASS_RATE || 0.8)
 const DLQ_NAME = "moderation-worker:dlq"
 const LAST_JOB = "moderation-worker:last_job"
 const JOB_COUNT = "moderation-worker:jobs_completed"
+const CATALOG_DB_MOD_STATUS_ENDPOINT = "http://catalog-service:3002/mod-result"
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -119,7 +120,7 @@ function getValidPayload(raw) {
     }
 
     const allowedKeys = [
-      "originalFileName",
+      "originalFilename",
       "contentType",
       "fileSizeBytes",
       "uploadedBy",
@@ -147,7 +148,7 @@ function getValidPayload(raw) {
 
     // capture just what we need (discard "status" and "updatedAt")
     const {
-      originalFileName,
+      originalFilename,
       contentType,
       fileSizeBytes,
       uploadedBy,
@@ -158,7 +159,7 @@ function getValidPayload(raw) {
     return {
       valid: true,
       video: {
-        originalFileName,
+        originalFilename,
         contentType,
         fileSizeBytes,
         uploadedBy,
@@ -218,11 +219,10 @@ async function handleTranscodeComplete(rawMessage) {
   console.log("Payload is valid")
 
   const payload = result.video
-
   const fileHash = payload.fileHash
-  
   const [ approved, status, reason ] = simulateContentReview(payload)
 
+  // add to moderation db
   await pool.query(
     `
       INSERT INTO moderation_results (
@@ -240,19 +240,17 @@ async function handleTranscodeComplete(rawMessage) {
 
   console.log('Moderation recorded to database', { fileHash, status, reason })
 
-  if (!approved) {
-    await redis.publish(
-      VIDEO_REJECTED_EVENT,
-      JSON.stringify({
-        fileHash,
-        status,
-        reason,
-        moderatedAt: new Date().toISOString(),
-        video: payload
-      })
-    )
-    console.log(`Published ${VIDEO_REJECTED_EVENT} event`)
-  }
+
+  // save moderation status in catalog db
+  console.log("Sending result to catalog service")
+  const catalogRes = await fetch(CATALOG_DB_MOD_STATUS_ENDPOINT, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ fileHash, status }),
+  });
+
+  const catalogBody = await catalogRes.json().catch(() => null);
+  console.log("Catalog db response:", catalogRes.status, JSON.stringify(catalogBody));
 
   // mark time of last successfully processed job for health endpoint
   const jobInfo = {
