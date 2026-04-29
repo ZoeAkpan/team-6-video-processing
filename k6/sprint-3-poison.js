@@ -274,49 +274,86 @@ function getWorkerHealth() {
   };
 }
 
-// ── Main test function ─────────────────────────────────────────────────────────
+export async function setup() {
+  const health = getWorkerHealth();
+  const initialDlqDepth = Number(await redisClient.llen(TRANSCODE_DLQ));
 
-export default function () {
-  // 70% normal requests, 30% poison pills
-  const isPoison = Math.random() < 0.3;
+  console.log(
+    `initial worker health: ${JSON.stringify({
+      status: health.body?.status,
+      queue_depth: health.queueDepth,
+      dlq_depth: initialDlqDepth,
+      last_job_at: health.body?.lastJobAt ?? health.body?.last_job_at ?? null,
+    })}`
+  );
 
-  if (isPoison) {
-    const pill = poisonPills[Math.floor(Math.random() * poisonPills.length)];
-    const body = pill.raw ?? JSON.stringify(pill.body);
+  return { initialDlqDepth };
+}
 
-    const res = http.post(TARGET_URL, body, {
-      headers: { "Content-Type": "application/json" },
-      tags:    { endpoint: "upload", type: "poison", label: pill.label },
-    });
+export default async function (data) {
+  // Randomly decide whether to inject a worker poison pill and/or
+  //  send an edge poison upload on this iteration
+  const shouldInjectWorkerPoison = Math.random() < POISON_RATIO;
+  const shouldSendEdgePoison = Math.random() < EDGE_POISON_RATIO;
 
-    const ok = check(res, {
-      [`poison [${pill.label}] rejected with ${pill.expectedStatus}`]: (r) =>
-        r.status === pill.expectedStatus,
-    });
-
-    if (res.status === 400 || res.status === 403) {
-      poisonRejected.add(1);
-    } else {
-      poisonAccepted.add(1);
-      errorRate.add(1);
-    }
-
+  if (shouldInjectWorkerPoison) {
+    const injected = await injectWorkerPoison();
+    const validStillWorks = sendValidUpload("valid-after-worker-poison");
+    validAfterPoisonSuccessRate.add(injected && validStillWorks);
   } else {
-    const res = http.post(TARGET_URL, JSON.stringify(validPayload()), {
-      headers: { "Content-Type": "application/json" },
-      tags:    { endpoint: "upload", type: "valid" },
-    });
+    sendValidUpload();
+  }
 
-    const ok = check(res, {
-      "valid upload: status 201 or 200": (r) => r.status === 201 || r.status === 200,
-      "valid upload: has message field":  (r) => {
-        try { return !!JSON.parse(r.body).message; } catch { return false; }
-      },
-    });
+  if (shouldSendEdgePoison) {
+    sendEdgePoison();
+  }
 
-    res.status === 201 ? uploadsAccepted.add(1) : uploadsRejected.add(1);
-    errorRate.add(!ok);
+  // Periodically check worker health and DLQ depth to see 
+  // if poison pills are having an impact
+  if (__ITER % 10 === 0) {
+    const health = getWorkerHealth();
+    dlqObservedRate.add(
+      Number(health.dlqDepth ?? 0) > Number(data.initialDlqDepth ?? 0)
+    );
   }
 
   sleep(0.5);
+}
+
+export function teardown(data) {
+  let finalHealth = getWorkerHealth();
+
+  // If we don't see an increase in DLQ depth yet, wait a bit and check again
+  for (let i = 0; i < 10; i += 1) {
+    const dlqDepth = Number(finalHealth.dlqDepth ?? 0);
+    if (dlqDepth > Number(data.initialDlqDepth ?? 0)) {
+      break;
+    }
+
+    sleep(1);
+    finalHealth = getWorkerHealth();
+  }
+
+  const initialDlqDepth = Number(data.initialDlqDepth ?? 0);
+  const finalDlqDepth = Number(finalHealth.dlqDepth ?? 0);
+  const dlqIncreased = finalDlqDepth > initialDlqDepth;
+
+  dlqObservedRate.add(dlqIncreased);
+
+  check(finalHealth, {
+    "final worker status is healthy": (h) => h.healthy,
+    "final worker dlq_depth is non-zero": () => finalDlqDepth > 0,
+    "final worker dlq_depth increased during test": () => dlqIncreased,
+  });
+
+  console.log(
+    `final worker health: ${JSON.stringify({
+      status: finalHealth.body?.status,
+      queue_depth: finalHealth.queueDepth,
+      dlq_depth: finalDlqDepth,
+      dlq_depth_before_test: initialDlqDepth,
+      last_job_at:
+        finalHealth.body?.lastJobAt ?? finalHealth.body?.last_job_at ?? null,
+    })}`
+  );
 }
