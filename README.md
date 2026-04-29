@@ -155,6 +155,170 @@ curl http://localhost:3002/videos
 > Results are cached in Redis for 60 seconds (`catalog:videos:available`). Cache is invalidated automatically when a video is marked unavailable via the `video.rejected` pub/sub event.
 ---
 
+### POST /add-video
+ 
+```
+POST /add-video
+ 
+  Adds a video record to the catalog database. Called internally by the
+  transcode-worker after a video has been successfully processed. If a video
+  with the same fileHash already exists, the request is rejected.
+ 
+  Responses:
+    200  Video added to catalog successfully
+    400  Missing or invalid request body fields
+    401  Video with that fileHash already exists
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost:3002/add-video \
+  -H "Content-Type: application/json" \
+  -d '{
+    "originalFilename": "demo.mp4",
+    "contentType": "video/mp4",
+    "fileSizeBytes": 1000000,
+    "uploadedBy": "user-123",
+    "fileHash": "abc123",
+    "duration": 42
+  }'
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "upload to catalog db accepted"
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration"
+}
+```
+ 
+**Example response (401):**
+ 
+```json
+{
+  "error": "video already exists in catalog, cannot reupload"
+}
+```
+ 
+---
+ 
+### POST /mod-result
+ 
+```
+POST /mod-result
+ 
+  Updates the moderation status of an existing video in the catalog database.
+  Called internally by the moderation-worker after a moderation decision has
+  been made. The video must already exist in the catalog.
+ 
+  Responses:
+    200  Moderation status updated successfully
+    400  Missing or invalid request body fields
+    401  No video with that fileHash found in catalog
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost:3002/mod-result \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fileHash": "abc123",
+    "status": "approved"
+  }'
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "moderation status recorded"
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing fields from request body: fileHash and status"
+}
+```
+ 
+**Example response (401):**
+ 
+```json
+{
+  "error": "no video with that file hash found in catalog"
+}
+```
+ 
+---
+ 
+### POST /thumbnail
+ 
+```
+POST /thumbnail
+ 
+  Adds or updates a thumbnail entry for an existing video in the catalog
+  database. Called internally by the thumbnail-worker. If a thumbnail already
+  exists for the same fileHash and timestampSeconds, its URL is updated.
+  The video must already exist in the catalog.
+ 
+  Responses:
+    200  Thumbnail added or updated successfully
+    400  Missing or invalid request body fields
+    401  No video with that fileHash found in catalog
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost:3002/thumbnail \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fileHash": "abc123",
+    "thumbnailUrl": "https://example.com/thumbnails/abc123-5.jpg",
+    "timestampSeconds": "5"
+  }'
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "thumbnail added to database"
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing fields from request body: fileHash, thumbnailUrl, and timestampSeconds"
+}
+```
+ 
+**Example response (401):**
+ 
+```json
+{
+  "error": "no video with that file hash found in catalog"
+}
+```
+ 
+
 ## upload-service
 
 ### GET /health
