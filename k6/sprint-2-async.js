@@ -1,4 +1,4 @@
-// Sprint 6 — Triggering async processing and caching results
+// Sprint 2 — Triggering async processing and caching results
 //
 // Run from inside the holmes container:
 //   docker compose exec holmes bash

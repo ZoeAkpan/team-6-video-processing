@@ -1,4 +1,4 @@
-// Sprint 6 — Baseline load test with caching enabled
+// Sprint 2 — Baseline load test with caching enabled
 //
 // Run from inside the holmes container:
 //   docker compose exec holmes bash
