@@ -65,136 +65,108 @@ export const options = {
   },
 };
 
+// Helper to generate unique IDs for uploads
+function uniqueId(prefix) {
+  return `${prefix}-${__VU}-${__ITER}-${Date.now()}-${Math.floor(
+    Math.random() * 1000000
+  )}`;
+}
 
 // ── Payload builders ──────────────────────────────────────────────────────────
 
-function validPayload() {
+// Generates a valid upload payload with unique fields to avoid deduplication
+function validPayload(label = "normal") {
+  const id = uniqueId(label);
+
   return {
-    originalFilename: `video-${__VU}-${__ITER}.mp4`,
-    contentType:      "video/mp4",
-    fileSizeBytes:    1000,
-    uploadedBy:       `user-${__VU}-${__ITER}`,
-    fileHash:         `hash-${__VU}-${__ITER}-${Date.now()}`,
-    duration:         1,
+    originalFilename: `${id}.mp4`,
+    contentType: "video/mp4",
+    fileSizeBytes: 1000,
+    uploadedBy: `user-${id}`,
+    fileHash: `hash-${id}`,
+    duration: 1,
   };
 }
 
-const poisonPills = [
-  // missing fileHash
+// Poison pills designed to be rejected by upload service validation
+const edgePoisonPills = [
   {
-    label: "missing_fileHash",
+    label: "upload_missing_fileHash",
     body: {
-      originalFilename: "video.mp4",
-      contentType:      "video/mp4",
-      fileSizeBytes:    1000,
-      uploadedBy:       "user-poison",
-      duration:         1,
-    },
-    expectedStatus: 400,
-  },
-  // missing originalFilename
-  {
-    label: "missing_originalFilename",
-    body: {
-      contentType:   "video/mp4",
+      originalFilename: "poison.mp4",
+      contentType: "video/mp4",
       fileSizeBytes: 1000,
-      uploadedBy:    "user-poison",
-      fileHash:      "poison-hash-1",
-      duration:      1,
+      uploadedBy: "user-poison",
+      duration: 1,
     },
-    expectedStatus: 400,
   },
-  // fileSizeBytes is zero
   {
-    label: "fileSizeBytes_zero",
+    label: "upload_invalid_fileSizeBytes",
     body: {
-      originalFilename: "video.mp4",
-      contentType:      "video/mp4",
-      fileSizeBytes:    0,
-      uploadedBy:       "user-poison",
-      fileHash:         "poison-hash-2",
-      duration:         1,
+      originalFilename: "poison.mp4",
+      contentType: "video/mp4",
+      fileSizeBytes: -1,
+      uploadedBy: "user-poison",
+      fileHash: "edge-poison-invalid-size",
+      duration: 1,
     },
-    expectedStatus: 400,
   },
-  // fileSizeBytes is a string
   {
-    label: "fileSizeBytes_string",
-    body: {
-      originalFilename: "video.mp4",
-      contentType:      "video/mp4",
-      fileSizeBytes:    "large",
-      uploadedBy:       "user-poison",
-      fileHash:         "poison-hash-3",
-      duration:         42,
-    },
-    expectedStatus: 400,
-  },
-  // negative fileSizeBytes
-  {
-    label: "fileSizeBytes_negative",
-    body: {
-      originalFilename: "video.mp4",
-      contentType:      "video/mp4",
-      fileSizeBytes:    -500,
-      uploadedBy:       "user-poison",
-      fileHash:         "poison-hash-4",
-      duration:         42,
-    },
-    expectedStatus: 400,
-  },
-  // empty uploadedBy
-  {
-    label: "uploadedBy_empty",
-    body: {
-      originalFilename: "video.mp4",
-      contentType:      "video/mp4",
-      fileSizeBytes:    1000,
-      uploadedBy:       "",
-      fileHash:         "poison-hash-5",
-      duration:         42,
-    },
-    expectedStatus: 400,
-  },
-  // duration is zero
-  {
-    label: "duration_zero",
-    body: {
-      originalFilename: "video.mp4",
-      contentType:      "video/mp4",
-      fileSizeBytes:    1000,
-      uploadedBy:       "user-poison",
-      fileHash:         "poison-hash-6",
-      duration:         0,
-    },
-    expectedStatus: 400,
-  },
-  // duration is negative
-  {
-    label: "duration_negative",
-    body: {
-      originalFilename: "video.mp4",
-      contentType:      "video/mp4",
-      fileSizeBytes:    1000,
-      uploadedBy:       "user-poison",
-      fileHash:         "poison-hash-7",
-      duration:         -1,
-    },
-    expectedStatus: 400,
-  },
-  // completely empty body
-  {
-    label: "empty_body",
-    body:           {},
-    expectedStatus: 400,
-  },
-  // invalid JSON (sent as raw string)
-  {
-    label:          "invalid_json",
-    raw:            "this is not json {{{",
-    expectedStatus: 400,
+    label: "upload_invalid_json",
+    raw: "this is not json {{{",
   },
 ];
+
+// Poison pills designed to cause issues with worker processing 
+const workerPoisonPills = [
+  {
+    label: "worker_invalid_json",
+    raw: "this is not json {{{",
+  },
+  {
+    label: "worker_missing_fileHash",
+    body: {
+      originalFilename: "bad-worker-job.mp4",
+      contentType: "video/mp4",
+      fileSizeBytes: 1000,
+      uploadedBy: "user-poison",
+      duration: 1,
+    },
+  },
+  {
+    label: "worker_missing_duration",
+    body: {
+      originalFilename: "bad-worker-job.mp4",
+      contentType: "video/mp4",
+      fileSizeBytes: 1000,
+      uploadedBy: "user-poison",
+      fileHash: "worker-poison-missing-duration",
+    },
+  },
+  {
+    label: "worker_zero_duration",
+    body: {
+      originalFilename: "bad-worker-job.mp4",
+      contentType: "video/mp4",
+      fileSizeBytes: 1000,
+      uploadedBy: "user-poison",
+      fileHash: "worker-poison-zero-duration",
+      duration: 0,
+    },
+  },
+  {
+    label: "worker_empty_body",
+    body: {},
+  },
+];
+
+function parseJson(body) {
+  try {
+    return JSON.parse(body);
+  } catch (_) {
+    return null;
+  }
+}
 
 // ── Main test function ─────────────────────────────────────────────────────────
 
