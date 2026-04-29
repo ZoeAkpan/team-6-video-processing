@@ -37,7 +37,7 @@ subscriber.subscribe("transcode_complete", async (message) => {console.log("[tra
   
   try{
     const video = await pool.query(
-      `SELECT id FROM video WHERE fileHash = $1`,
+      `SELECT 1 FROM video WHERE file_hash = $1`,
       [data.fileHash]
     );
     if (video.rows.length === 0) {
@@ -98,6 +98,183 @@ app.get("/health", async (req, res) => {
   res.status(statusCode).json(health);
 });
 
+app.post("/add-video", async (req, res) => {
+  console.log(`got a request to add a video to catalog db`)
+  // error checking: make sure the request body has the necessary fields
+  const expectedFields = [
+    'originalFilename',
+    'contentType',
+    'fileSizeBytes',
+    'uploadedBy',
+    'fileHash',
+    'duration',
+  ]
+  if (!expectedFields.every((field) => field in req.body)) {
+    console.log("invalid request body, returning 400")
+    return res.status(400).json({
+      error:
+        'missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration',
+    })
+  }
+
+  const {
+    originalFilename,
+    contentType,
+    fileSizeBytes,
+    uploadedBy,
+    fileHash,
+    duration,
+  } = req.body
+
+  console.log(`file hash is ${fileHash}`)
+
+  // make sure this fileHash is not already in the catalog db (should never have to worry about this)
+  const rows = await pool.query(
+    `SELECT 1 FROM video WHERE file_hash = $1`,
+    [fileHash]
+  )
+  if (rows.length > 0) {
+    console.log("video with that file hash already exists")
+    return res.status(401).json({
+      error: 'video already exists in catalog, cannot reupload',
+    })
+  }
+
+  // add video to catalog db
+  try {
+    await pool.query(
+      `INSERT INTO video (
+        file_hash,
+        original_filename,
+        content_type,
+        file_size_bytes,
+        uploaded_by,
+        duration
+      )
+      VALUES ($1, $2, $3, $4, $5, $6)`,
+      [fileHash, originalFilename, contentType, fileSizeBytes, uploadedBy, duration]
+    )
+
+    console.log("added to database")
+    return res.status(200).json({
+      message: "upload to catalog db accepted",
+    })
+  } catch (err) {
+    console.error(`error adding to database: ${err.message}`)
+    return res.status(500).json({
+      error: `database error: ${err.message}`,
+    })
+  }
+  
+})
+
+app.post("/mod-result", async (req, res) => {
+  console.log(`got a request to update a video's moderation status`)
+  // error checking: make sure the request body has the necessary fields
+  const expectedFields = [
+    'fileHash',
+    'status',
+  ]
+  if (!expectedFields.every((field) => field in req.body)) {
+    console.log("invalid request body, returning 400")
+    return res.status(400).json({
+      error:
+        'missing fields from request body: fileHash and status',
+    })
+  }
+
+  const { fileHash, status } = req.body
+  console.log(`file hash is ${fileHash}`)
+
+  // make sure this fileHash IS already in the catalog db (should never have to worry about this)
+  const rows = await pool.query(
+    `SELECT 1 FROM video WHERE file_hash = $1`,
+    [fileHash]
+  )
+  if (rows.length === 0) {
+    console.log("no videos in catalog db with that file hash")
+    return res.status(401).json({
+      error: 'no video with that file hash found in catalog',
+    })
+  }
+
+  const videoStatus = status === "rejected" ? "unavailable" : "available"
+
+  // update video's moderation status
+  try {
+    await pool.query(
+      `UPDATE video SET moderation_status = $1, updated_at = NOW() WHERE file_hash = $2`,
+      [videoStatus, fileHash]
+    )
+
+    console.log(`moderation status set in database to ${videoStatus}`)
+    return res.status(200).json({
+      message: "moderation status recorded",
+    })
+  } catch (err) {
+    console.error(`error updating database: ${err.message}`)
+    return res.status(500).json({
+      error: `database error: ${err.message}`,
+    })
+  }
+
+  // delete from cache if it's there
+  await redisClient.del(`video:${fileHash}`);
+  
+})
+
+app.post("/thumbnail", async (req, res) => {
+  console.log(`got a request to add a thumbnail for a video`)
+  // error checking: make sure the request body has the necessary fields
+  const expectedFields = ["fileHash", "thumbnailUrl", "timestampSeconds"]
+  if (!expectedFields.every((field) => field in req.body)) {
+    console.log("invalid request body, returning 400")
+    return res.status(400).json({
+      error:
+        'missing fields from request body: fileHash, thumbnailUrl, and timestampSeconds',
+    })
+  }
+
+  const { fileHash, thumbnailUrl, timestampSeconds } = req.body
+  console.log(`file hash is ${fileHash}`)
+
+  // make sure this fileHash IS already in the catalog db (should never have to worry about this)
+  const rows = await pool.query(
+    `SELECT 1 FROM video WHERE file_hash = $1`,
+    [fileHash]
+  )
+  if (rows.length === 0) {
+    console.log("no videos in catalog db with that file hash")
+    return res.status(401).json({
+      error: 'no video with that file hash found in catalog',
+    })
+  }
+
+  // add this thumbnail to thumbnail table
+  try {
+    await pool.query(
+      `
+        INSERT INTO thumbnail (file_hash, thumbnail_url, timestamp_seconds)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (file_hash, timestamp_seconds)
+        DO UPDATE SET thumbnail_url = EXCLUDED.thumbnail_url
+      `,
+      [fileHash, thumbnailUrl, timestampSeconds]
+    )
+
+    console.log("thumbnail added to database")
+    return res.status(200).json({
+      message: "thumbnail added to database",
+    })
+  } catch (err) {
+    console.error(`error updating database: ${err.message}`)
+    return res.status(500).json({
+      error: `database error: ${err.message}`,
+    })
+  }
+  
+})
+
 app.get("/videos", async (req, res) => {
   try {
     const cached = await redisClient.get("catalog:videos:available");
@@ -113,7 +290,7 @@ app.get("/videos", async (req, res) => {
 
     console.log("[cache miss] /videos querying DB");
     const result = await pool.query(
-      `SELECT * FROM video WHERE status = 'available' ORDER BY created_at DESC`
+      `SELECT * FROM video WHERE moderation_status = 'available' ORDER BY created_at DESC`
     );
     await redisClient.setEx("catalog:videos:available", 60, JSON.stringify(result.rows));
     res.json(result.rows);
@@ -130,7 +307,7 @@ app.get("/video/search", async (req,res) => {
     }
 
     const result = await pool.query(
-      `SELECT * FROM video WHERE title ILIKE $1 AND status = 'available' ORDER BY created_at DESC`, [`%${q}%`]
+      `SELECT * FROM video WHERE title LIKE $1 AND moderation_status = 'available' ORDER BY created_at DESC`, [`%${q}%`]
     );
 
     res.json(result.rows);
@@ -138,53 +315,25 @@ app.get("/video/search", async (req,res) => {
     res.status(500).json({ error: err.message});
   }
 })
-async function handleRejection(message, attempt = 1) {
-  try {
-    const parsed = JSON.parse(message);
-    const { fileHash } = parsed;
-    if (!fileHash) throw new Error("missing fileHash");
 
-    await pool.query(
-      `UPDATE video SET status = 'unavailable' WHERE file_hash = $1`,
-      [fileHash]
-    );
-    await redisClient.del("catalog:videos:available");
-    console.log(`[moderation-sub] marked video ${fileHash} as unavailable`);
-  } catch (err) {
-    if (attempt < 3) {
-      const delay = Math.pow(2, attempt) * 100;
-      console.warn(`[moderation-sub] retry ${attempt}/3 in ${delay}ms — ${err.message}`);
-      await new Promise((r) => setTimeout(r, delay));
-      return handleRejection(message, attempt + 1);
-    }
-    console.error(`[moderation-sub] sending to DLQ after 3 attempts — ${err.message}`);
-    await redisClient.lPush(
-      DLQ_KEY,
-      JSON.stringify({ message, error: err.message, at: new Date().toISOString() })
-    );
-  }
-}
-
-redisSub.subscribe("video-rejected", (message) => handleRejection(message));
-
-app.get("/video/:id", async (req, res) => {
-  const {id} = req.params;
+app.get("/video/:hash", async (req, res) => {
+  const {hash} = req.params;
 
   try {
-    const cached = await redisClient.get(`video:${id}`);
+    const cached = await redisClient.get(`video:${hash}`);
     if (cached) {
       try{
         const parsed = JSON.parse(cached);
-        console.log(`[cache hit] /videos/${id} served from Redis`);
+        console.log(`[cache hit] /videos/${hash} served from Redis`);
         return res.json(parsed);
       } catch (err) {
-        console.error(`[cached corruption] invalid JSON for video:${id}, deleting`);
-        await redisClient.del(`video:${id}`);
+        console.error(`[cached corruption] invalid JSON for video:${hash}, deleting`);
+        await redisClient.del(`video:${hash}`);
       }
     }
-    console.log(`[cache miss] /videos/${id} querying DB`);
+    console.log(`[cache miss] /videos/${hash} querying DB`);
     const result = await pool.query(
-      `SELECT * FROM video WHERE id = $1 AND status = 'available'`, [id]
+      `SELECT * FROM video WHERE fileHash = $1 AND moderation_status = 'available'`, [hash]
     );
 
     if (result.rows.length === 0){
@@ -192,7 +341,7 @@ app.get("/video/:id", async (req, res) => {
     }
 
     const video = result.rows[0];
-    await redisClient.set(`video:${id}`, JSON.stringify(video), {EX:60});
+    await redisClient.set(`video:${hash}`, JSON.stringify(video), {EX:60});
     res.json(video);
   } catch (err) {
     res.status(500).json({ error: err.message});
