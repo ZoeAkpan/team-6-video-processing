@@ -1,0 +1,17 @@
+:80 {
+    reverse_proxy upload-service:3000 {
+        lb_policy round_robin
+    }
+}
+
+:81 {
+    reverse_proxy quota-service:3001 {
+        lb_policy round_robin
+    }
+}
+
+:82 {
+    reverse_proxy catalog-service:3002 {
+        lb_policy round_robin
+    }
+}
