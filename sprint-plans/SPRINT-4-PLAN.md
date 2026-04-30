@@ -8,13 +8,11 @@
 
 ## Goal
 
-[Which services will you replicate? What is the exact `--scale` command? What polish work remains?]
-
-We need to replicate at least three services, so we’ve chosen to replicate the catalog, upload, and quota services. There are going to be 3 commands:
-docker compose up --scale upload-service=(some number here)
-docker compose up --scale quota-service=(some number here)
-docker compose up --scale catalog-service=(some number here)
-where Caddy should ultimately discover the replicas. We are planning to clean up the code by strengthening variable names, organizing and adding information to the README.md, removing unnecessary code, and testing to ensure all workers/services work. 
+We need to replicate at least three services, so we’ve chosen to replicate the catalog, upload, and quota services. 
+```
+docker compose up -d --build --scale upload-service=3 --scale quota-service=3 --scale catalog-service=3 
+```
+Caddy will handle load balancing between the replicas. We are planning to clean up the code by strengthening variable names, organizing and adding information to the README.md, removing unnecessary code, and testing to ensure all workers/services work. 
 
 ---
 
@@ -27,6 +25,7 @@ where Caddy should ultimately discover the replicas. We are planning to clean up
 | [Gabriella Wang]      | `search-index-worker` |
 | [Jihyun Kim]      | `quota-service/` |
 | [Zoë Akpan] | `upload-service` | 
+| [Nishil Adina] | `moderation-worker/`, `README.md` |
 
 ---
 
@@ -52,8 +51,6 @@ where Caddy should ultimately discover the replicas. We are planning to clean up
 - [ ] Remove any commented out code
 - [ ] Remove any random comments or unhelpful logging 
 
-
-
 ### [Gabriella Wang]
 
 - [ ] Update README.md with search-index-worker health endpoint
@@ -72,13 +69,18 @@ where Caddy should ultimately discover the replicas. We are planning to clean up
 - [ ] Update README.md to describe scaling capabilities
 - [ ] Strengthen testing for transcode module
 
+### [Nishil Adina]
+- [ ] Polish code in moderation-worker
+- [ ] Ensure all endpoints across the system are documented in README.md
+- [ ] Add seed data for demo purposes (endpoint in upload-service?)
+
 ---
 
 ## Risks
+
 Since this is the last sprint we are going to do, there might not be enough time to finish everything, including polishing up the code and making sure it looks nice for the presentation. 
----
 
 ## Definition of Done
 
-`docker compose up --scale [service]=3` starts successfully. `docker compose ps` shows all replicas as `(healthy)`. k6 scaling comparison shows measurable improvement. Replica failure test shows no dropped requests.
+`docker compose up -d --build --scale upload-service=3 --scale quota-service=3 --scale catalog-service=3` starts successfully. `docker compose ps` shows all replicas as `(healthy)`. k6 scaling comparison shows measurable improvement. Replica failure test shows no dropped requests.
 
