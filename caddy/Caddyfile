@@ -1,0 +1,19 @@
+:80 {
+    handle_path /upload-service* {
+        reverse_proxy upload-service:3000 {
+            lb_policy round_robin
+        }
+    }
+
+    handle_path /quota-service* {
+        reverse_proxy quota-service:3001 {
+            lb_policy round_robin
+        }
+    }
+
+    handle_path /catalog-service* {
+        reverse_proxy catalog-service:3002 {
+            lb_policy round_robin
+        }
+    }
+}
