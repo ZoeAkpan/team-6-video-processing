@@ -111,6 +111,19 @@ services:
   #     timeout: 3s
   #     retries: 5
 
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - '80:80'
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+    depends_on:
+      - upload-service
+      - quota-service
+      - catalog-service
+    networks:
+      - team-net
+
   moderation-db:
     image: postgres:16
     container_name: moderation-db
