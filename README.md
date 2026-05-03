@@ -35,6 +35,9 @@ docker compose up --build
 # Start with service replicas (Sprint 4)
 docker compose up --scale your-service=3
 
+# Start upload-service behind Caddy with three replicas
+docker compose up --build --scale upload-service=3
+
 # Verify all services are healthy
 docker compose ps
 
@@ -48,7 +51,7 @@ docker compose exec holmes bash
 ### Base URLs (development)
 | Service/Worker | Port |
 |-------------------------|-----------------------|
-| `upload-service`        | http://localhost:3000 |
+| `upload-service`        | http://localhost/upload-service |
 | `quota-service`         | http://localhost:3001 |
 | `catalog-service`       | http://localhost:3002 |
 | `playback-service`      | http://localhost:3003 |
@@ -341,12 +344,20 @@ and Redis.
 curl http://localhost:3000/health
 ```
 
+When `upload-service` is scaled with Docker Compose, send external requests
+through Caddy instead:
+
+```bash
+curl http://localhost/upload-service/health
+```
+
 **Example response (200):**
 
 ```json
 {
   "status": "healthy",
   "service": "upload-service",
+  "instanceId": "video-processing-upload-service-1",
   "timestamp": "2026-04-27T18:21:00.000Z",
   "uptime_seconds": 42,
   "checks": {
@@ -392,7 +403,7 @@ job to the Redis `transcode-jobs` queue.
 **Example request:**
 
 ```bash
-curl -X POST http://localhost:3000/upload \
+curl -X POST http://localhost/upload-service/upload \
   -H "Content-Type: application/json" \
   -d '{
     "originalFilename": "demo.mp4",
