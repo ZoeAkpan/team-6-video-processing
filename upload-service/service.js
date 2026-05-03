@@ -13,8 +13,15 @@ const startTime = Date.now()
 const instanceId = process.env.INSTANCE_ID ?? process.env.HOSTNAME ?? 'unknown'
 
 app.use(express.json())
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
   res.set('X-Service-Instance', instanceId)
+  res.on('finish', () => {
+    log('request_handled', {
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+    })
+  })
   next()
 })
 
