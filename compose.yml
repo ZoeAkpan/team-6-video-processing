@@ -343,10 +343,9 @@ services:
 
   upload-service:
     build: ./upload-service
-    container_name: upload-service
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     networks:
       - team-net
     environment:
