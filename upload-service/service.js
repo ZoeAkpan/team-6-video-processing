@@ -10,8 +10,13 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 const redis = createClient({ url: process.env.REDIS_URL })
 
 const startTime = Date.now()
+const instanceId = process.env.INSTANCE_ID ?? process.env.HOSTNAME ?? 'unknown'
 
 app.use(express.json())
+app.use((_req, res, next) => {
+  res.set('X-Service-Instance', instanceId)
+  next()
+})
 
 pool.on('error', (err) => {
   console.error(
@@ -37,6 +42,7 @@ function log(event, fields = {}) {
   console.log(
     JSON.stringify({
       event,
+      instanceId,
       ...fields,
       timestamp: new Date().toISOString(),
     })
@@ -47,6 +53,7 @@ function logError(event, err, fields = {}) {
   console.error(
     JSON.stringify({
       event,
+      instanceId,
       message: err.message,
       stack: err.stack,
       ...fields,
@@ -247,6 +254,7 @@ app.get('/health', async (_req, res) => {
   const body = {
     status: healthy ? 'healthy' : 'unhealthy',
     service: process.env.SERVICE_NAME ?? 'upload-service',
+    instanceId,
     timestamp: new Date().toISOString(),
     uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
     checks,
