@@ -33,7 +33,7 @@
 docker compose up --build
 
 # Start with service replicas (Sprint 4)
-docker compose up --scale your-service=3
+docker compose up -d --build --scale upload-service=3 --scale quota-service=3 --scale catalog-service=3
 
 # Verify all services are healthy
 docker compose ps
@@ -46,23 +46,45 @@ docker compose exec holmes bash
 ```
 
 ### Base URLs (development)
-| Service/Worker | Port |
+| Component | URL |
 |-------------------------|-----------------------|
-| `upload-service`        | http://localhost:3000 |
-| `quota-service`         | http://localhost:3001 |
-| `catalog-service`       | http://localhost:3002 |
+| Caddy load balancer     | http://localhost |
+| `upload-service` via Caddy | http://localhost/upload-service |
+| `quota-service` via Caddy | http://localhost/quota-service |
+| `catalog-service` via Caddy | http://localhost/catalog-service |
 | `playback-service`      | http://localhost:3003 |
 | `transcode-worker`      | http://localhost:3004 |
 | `thumbnail-worker`      | http://localhost:3005 |
 | `search-index-worker`   | http://localhost:3006 |
 | `moderation-worker`     | http://localhost:3007 |
-| `holmes`                | (no port — access via exec) |
+| `holmes`                | (no port; access via exec) |
 
 
 > From inside holmes, services are reachable by name:
 > `curl http://your-service:3000/health`
 >
 > See [holmes/README.md](holmes/README.md) for a full tool reference.
+
+Sprint 4 replicates `upload-service`, `quota-service`, and `catalog-service`.
+Those services are stateless HTTP APIs: each replica stores durable state in its
+service database or Redis, not in local process memory. `quota-service` shares
+all quota state through `quota-db`, so all replicas enforce the same upload
+counts and storage totals.
+
+To verify Caddy is distributing quota traffic across replicas:
+
+```bash
+for i in $(seq 1 20); do curl -s http://localhost/quota-service/health | jq .serviceInstance; done
+```
+
+To run the Sprint 4 k6 tests from Holmes:
+
+```bash
+docker compose exec holmes bash
+BASE_URL=http://caddy:80 k6 run --env SCALE=single /workspace/k6/sprint-4-scale.js
+BASE_URL=http://caddy:80 k6 run --env SCALE=replicated /workspace/k6/sprint-4-scale.js
+BASE_URL=http://caddy:80 k6 run /workspace/k6/sprint-4-replica.js
+```
 
 ---
 
@@ -96,7 +118,7 @@ GET /health
 **Example request:**
 
 ```bash
-curl http://localhost:3002/health
+curl http://localhost/catalog-service/health
 ```
 
 **Example response (200):**
@@ -134,7 +156,7 @@ GET /videos
 **Example request:**
 
 ```bash
-curl http://localhost:3002/videos
+curl http://localhost/catalog-service/videos
 ```
 
 **Example response (200):**
@@ -174,7 +196,7 @@ POST /add-video
 **Example request:**
  
 ```bash
-curl -X POST http://localhost:3002/add-video \
+curl -X POST http://localhost/catalog-service/add-video \
   -H "Content-Type: application/json" \
   -d '{
     "originalFilename": "demo.mp4",
@@ -231,7 +253,7 @@ POST /mod-result
 **Example request:**
  
 ```bash
-curl -X POST http://localhost:3002/mod-result \
+curl -X POST http://localhost/catalog-service/mod-result \
   -H "Content-Type: application/json" \
   -d '{
     "fileHash": "abc123",
@@ -285,7 +307,7 @@ POST /thumbnail
 **Example request:**
  
 ```bash
-curl -X POST http://localhost:3002/thumbnail \
+curl -X POST http://localhost/catalog-service/thumbnail \
   -H "Content-Type: application/json" \
   -d '{
     "fileHash": "abc123",
@@ -338,7 +360,7 @@ and Redis.
 **Example request:**
 
 ```bash
-curl http://localhost:3000/health
+curl http://localhost/upload-service/health
 ```
 
 **Example response (200):**
@@ -392,7 +414,7 @@ job to the Redis `transcode-jobs` queue.
 **Example request:**
 
 ```bash
-curl -X POST http://localhost:3000/upload \
+curl -X POST http://localhost/upload-service/upload \
   -H "Content-Type: application/json" \
   -d '{
     "originalFilename": "demo.mp4",
@@ -484,7 +506,7 @@ GET /health
 **Example request:**
 
 ```bash
-curl http://localhost:3001/health
+curl http://localhost/quota-service/health
 ```
 
 **Example response (200):**
@@ -492,6 +514,8 @@ curl http://localhost:3001/health
 ```json
 {
   "status": "healthy",
+  "service": "quota-service",
+  "serviceInstance": "team-6-video-processing-quota-service-1",
   "db": "ok",
   "redis": "ok"
 }
@@ -513,7 +537,7 @@ POST /quota/check
 **Example request:**
 
 ```bash
-curl -X POST http://localhost:3001/quota/check \
+curl -X POST http://localhost/quota-service/quota/check \
   -H "Content-Type: application/json" \
   -d '{
     "userId": "user-123",
@@ -525,6 +549,7 @@ curl -X POST http://localhost:3001/quota/check \
 
 ```json
 {
+  "serviceInstance": "team-6-video-processing-quota-service-2",
   "allowed": true,
   "reason": "ok",
   "userId": "user-123",
@@ -534,9 +559,14 @@ curl -X POST http://localhost:3001/quota/check \
   "remainingUploadSlots": 9,
   "storageUsedBytes": 1000000,
   "storageLimitBytes": 1073741824,
-  "remainingBytes": 1072741824,
+  "remainingBytes": 1072741824
 }
 ```
+
+`quota-service` is safe to run with three replicas because it keeps quota state
+in `quota-db`. `POST /quota/consume` and `POST /quota/release` use Postgres
+transactions and row locks, so duplicate requests for the same `userId` and
+`fileHash` are idempotent even when requests land on different replicas.
 
 ## playback-service
  

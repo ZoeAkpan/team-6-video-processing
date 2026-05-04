@@ -247,10 +247,7 @@ services:
   
   quota-service:
     build: ./quota-service
-    container_name: quota-service
     restart: unless-stopped
-    ports:
-      - "3001:3001"
     networks:
       - team-net
     environment:
@@ -343,10 +340,7 @@ services:
 
   upload-service:
     build: ./upload-service
-    container_name: upload-service
     restart: unless-stopped
-    ports:
-      - "3000:3000"
     networks:
       - team-net
     environment:
@@ -391,10 +385,7 @@ services:
 
   catalog-service:
     build: ./catalog-service
-    container_name: catalog-service
     restart: unless-stopped
-    ports:
-      - "3002:3002"
     networks:
       - team-net
     environment:

@@ -1,19 +1,37 @@
 :80 {
     handle_path /upload-service* {
-        reverse_proxy upload-service:3000 {
+        reverse_proxy {
+            dynamic a upload-service 3000 {
+                resolvers 127.0.0.11
+                refresh 5s
+                versions ipv4
+            }
             lb_policy round_robin
+            lb_try_duration 5s
         }
     }
 
     handle_path /quota-service* {
-        reverse_proxy quota-service:3001 {
+        reverse_proxy {
+            dynamic a quota-service 3001 {
+                resolvers 127.0.0.11
+                refresh 5s
+                versions ipv4
+            }
             lb_policy round_robin
+            lb_try_duration 5s
         }
     }
 
     handle_path /catalog-service* {
-        reverse_proxy catalog-service:3002 {
+        reverse_proxy {
+            dynamic a catalog-service 3002 {
+                resolvers 127.0.0.11
+                refresh 5s
+                versions ipv4
+            }
             lb_policy round_robin
+            lb_try_duration 5s
         }
     }
 }
