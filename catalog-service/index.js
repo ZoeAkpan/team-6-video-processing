@@ -46,14 +46,6 @@ subscriber.subscribe("transcode_complete", async (message) => {console.log("[tra
       return;
     }
     const videoId = video.rows[0].id;
-    await pool.query(
-      `INSERT INTO transcode_output (video_id, resolution) VALUES ($1, $2) ON CONFLICT (video_id, resolution) DO NOTHING`,
-      [videoId, data.resolution]
-    );
-    await pool.query(
-      `UPDATE video SET status = 'available' WHERE id = $1`,
-      [videoId]
-    );
     await redisClient.del("catalog:videos:available");
     await redisClient.set("catalog:last_processed_at", new Date().toISOString());
     console.log("[transcode_complete] video", videoId, "status updated to available");
@@ -82,18 +74,13 @@ app.get("/health", async (req, res) => {
   try {
     await redisClient.ping();
     health.dlq_depth = await redisClient.lLen(DLQ_KEY);
-    const last = await redisClient.get("catalog: last_procesed_at");
+    const last = await redisClient.get("catalog: last_processed_at");
     health.last_processed_at = last || null;
   } catch (err) {
     health.status = "unhealthy";
     health.redis = "error: " + err.message;
   }
 
-  try {
-    health.dlq_depth = await redisClient.lLen(DLQ_KEY);
-  } catch (err) {
-    health.dlq_depth = -1;
-  }
   const statusCode = health.status === "healthy" ? 200 : 503;
   res.status(statusCode).json(health);
 });
@@ -207,6 +194,7 @@ app.post("/mod-result", async (req, res) => {
       [videoStatus, fileHash]
     )
 
+    await redisClient.del(`video:${fileHash}`);
     console.log(`moderation status set in database to ${videoStatus}`)
     return res.status(200).json({
       message: "moderation status recorded",
@@ -217,9 +205,6 @@ app.post("/mod-result", async (req, res) => {
       error: `database error: ${err.message}`,
     })
   }
-
-  // delete from cache if it's there
-  await redisClient.del(`video:${fileHash}`);
   
 })
 
@@ -307,7 +292,7 @@ app.get("/video/search", async (req,res) => {
     }
 
     const result = await pool.query(
-      `SELECT * FROM video WHERE title LIKE $1 AND moderation_status = 'available' ORDER BY created_at DESC`, [`%${q}%`]
+      `SELECT * FROM video WHERE original_filename ILIKE $1 AND moderation_status = 'available' ORDER BY created_at DESC`, [`%${q}%`]
     );
 
     res.json(result.rows);
@@ -333,7 +318,7 @@ app.get("/video/:hash", async (req, res) => {
     }
     console.log(`[cache miss] /videos/${hash} querying DB`);
     const result = await pool.query(
-      `SELECT * FROM video WHERE fileHash = $1 AND moderation_status = 'available'`, [hash]
+      `SELECT * FROM video WHERE file_hash = $1 AND moderation_status = 'available'`, [hash]
     );
 
     if (result.rows.length === 0){

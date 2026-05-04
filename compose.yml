@@ -391,10 +391,7 @@ services:
 
   catalog-service:
     build: ./catalog-service
-    container_name: catalog-service
     restart: unless-stopped
-    ports:
-      - "3002:3002"
     networks:
       - team-net
     environment:
