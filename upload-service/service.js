@@ -68,6 +68,7 @@ async function postJson(url, body) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
   })
 
   const payload = await safeJson(response)
@@ -474,8 +475,8 @@ app.post('/upload', async (req, res) => {
   } catch (err) {
     logError('upload_error', err, { fileHash, uploadedBy })
 
-    return res.status(err.status ?? 500).json({
-      error: err.message ?? 'Upload failed',
+    return res.status(500).json({
+      error: 'Upload failed',
     })
   }
 })

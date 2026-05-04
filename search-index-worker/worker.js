@@ -108,12 +108,16 @@ async function startWorker() {
         console.log(`Successfully processed: ${payload.fileHash}`)
       } catch (err) {
         console.error(`Failed to process, routing to DLQ: ${err.message}`)
-        const dlqPayload = {
-          originalMessage: message,
-          error: err.message,
-          failedAt: new Date().toISOString()
+        try {
+            await redis.rPush(DLQ_NAME, JSON.stringify({
+                originalMessage: message,
+                error: err.message,
+                failedAt: new Date().toISOString()
+            }))
+        } catch (dlqErr) {
+            console.error(`DLQ push failed, message lost: ${dlqErr.message}`, message)
         }
-        await redis.rPush(DLQ_NAME, JSON.stringify(dlqPayload))}
+      }
     })
     app.listen(PORT, () => {
       console.log(`Health check server listening on port ${PORT}`)
@@ -124,5 +128,17 @@ async function startWorker() {
     process.exit(1)
   }
 }
+
+async function shutdown(signal) {
+    console.log(`Shutting down (${signal})`)
+    await subscriber.unsubscribe()
+    await subscriber.quit()
+    await redis.quit()
+    await pool.end()
+    process.exit(0)
+}
+
+process.on('SIGINT', () => shutdown('SIGINT'))
+process.on('SIGTERM', () => shutdown('SIGTERM'))
 
 startWorker()
