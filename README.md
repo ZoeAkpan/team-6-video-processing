@@ -101,246 +101,6 @@ This project is a video processing pipeline made up of small services connected 
   Follow the format described in the project documentation: compact code block notation, then an example curl and an example response. Add a level-2 heading per service, level-3 per endpoint.
 -->
 
-## catalog-service
-
-### GET /health
-
-```
-GET /health
-
-  Returns the health status of the catalog service and its database.
-
-  Responses:
-    200  Service healthy
-    503  Database unreachable
-```
-
-**Example request:**
-
-```bash
-curl http://localhost/catalog-service/health
-```
-
-**Example response (200):**
-
-```json
-{
-  "status": "healthy",
-  "db": "ok"
-}
-```
-
-**Example response (503):**
-
-```json
-{
-  "status": "unhealthy",
-  "db": "error: connection refused"
-}
-```
-
----
-
-### GET /videos
-
-```
-GET /videos
-
-  Returns video records with status = available ordered by newest first.
-
-  Responses:
-    200  JSON array of videos
-    500  Database query error
-```
-
-**Example request:**
-
-```bash
-curl http://localhost/catalog-service/videos
-```
-
-**Example response (200):**
-
-```json
-[
-  {
-    "id": "video-id",
-    "upload_id": "upload-id",
-    "user_id": "user-123",
-    "title": "Demo Video",
-    "original_filename": "demo.mp4",
-    "duration_seconds": 42,
-    "status": "available"
-  }
-]
-```
-> Results are cached in Redis for 60 seconds (`catalog:videos:available`). Cache is invalidated automatically when a video is marked unavailable via the `video.rejected` pub/sub event.
----
-
-### POST /add-video
- 
-```
-POST /add-video
- 
-  Adds a video record to the catalog database. Called internally by the
-  transcode-worker after a video has been successfully processed. If a video
-  with the same fileHash already exists, the request is rejected.
- 
-  Responses:
-    200  Video added to catalog successfully
-    400  Missing or invalid request body fields
-    401  Video with that fileHash already exists
-    500  Database error
-```
- 
-**Example request:**
- 
-```bash
-curl -X POST http://localhost/catalog-service/add-video \
-  -H "Content-Type: application/json" \
-  -d '{
-    "originalFilename": "demo.mp4",
-    "contentType": "video/mp4",
-    "fileSizeBytes": 1000000,
-    "uploadedBy": "user-123",
-    "fileHash": "abc123",
-    "duration": 42
-  }'
-```
- 
-**Example response (200):**
- 
-```json
-{
-  "message": "upload to catalog db accepted"
-}
-```
- 
-**Example response (400):**
- 
-```json
-{
-  "error": "missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration"
-}
-```
- 
-**Example response (401):**
- 
-```json
-{
-  "error": "video already exists in catalog, cannot reupload"
-}
-```
- 
----
- 
-### POST /mod-result
- 
-```
-POST /mod-result
- 
-  Updates the moderation status of an existing video in the catalog database.
-  Called internally by the moderation-worker after a moderation decision has
-  been made. The video must already exist in the catalog.
- 
-  Responses:
-    200  Moderation status updated successfully
-    400  Missing or invalid request body fields
-    401  No video with that fileHash found in catalog
-    500  Database error
-```
- 
-**Example request:**
- 
-```bash
-curl -X POST http://localhost/catalog-service/mod-result \
-  -H "Content-Type: application/json" \
-  -d '{
-    "fileHash": "abc123",
-    "status": "approved"
-  }'
-```
- 
-**Example response (200):**
- 
-```json
-{
-  "message": "moderation status recorded"
-}
-```
- 
-**Example response (400):**
- 
-```json
-{
-  "error": "missing fields from request body: fileHash and status"
-}
-```
- 
-**Example response (401):**
- 
-```json
-{
-  "error": "no video with that file hash found in catalog"
-}
-```
- 
----
- 
-### POST /thumbnail
- 
-```
-POST /thumbnail
- 
-  Adds or updates a thumbnail entry for an existing video in the catalog
-  database. Called internally by the thumbnail-worker. If a thumbnail already
-  exists for the same fileHash and timestampSeconds, its URL is updated.
-  The video must already exist in the catalog.
- 
-  Responses:
-    200  Thumbnail added or updated successfully
-    400  Missing or invalid request body fields
-    401  No video with that fileHash found in catalog
-    500  Database error
-```
- 
-**Example request:**
- 
-```bash
-curl -X POST http://localhost/catalog-service/thumbnail \
-  -H "Content-Type: application/json" \
-  -d '{
-    "fileHash": "abc123",
-    "thumbnailUrl": "https://example.com/thumbnails/abc123-5.jpg",
-    "timestampSeconds": "5"
-  }'
-```
- 
-**Example response (200):**
- 
-```json
-{
-  "message": "thumbnail added to database"
-}
-```
- 
-**Example response (400):**
- 
-```json
-{
-  "error": "missing fields from request body: fileHash, thumbnailUrl, and timestampSeconds"
-}
-```
- 
-**Example response (401):**
- 
-```json
-{
-  "error": "no video with that file hash found in catalog"
-}
-```
- 
-
 ## upload-service
 
 ### GET /health
@@ -546,8 +306,6 @@ curl -X POST http://localhost/upload-service/upload \
 }
 ```
 
----
-
 ## quota-service
 
 ### GET /health
@@ -579,6 +337,66 @@ curl http://localhost/quota-service/health
   "redis": "ok"
 }
 ```
+
+---
+
+
+### GET /quota/:userId
+ 
+```
+GET /quota/:userId
+ 
+  Returns the current quota state for a given user, including upload and
+  storage usage, limits, and a breakdown of total, active, and released
+  consumption records. If no quota row exists for the user, one is created
+  with default limits before returning.
+ 
+  Path:
+    userId  string  required  User or account identifier
+ 
+  Responses:
+    200  Quota state returned successfully
+    400  userId is missing or blank
+    500  Internal error
+```
+ 
+**Example request:**
+ 
+```bash
+curl http://localhost/quota-service/quota/user-123
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "userId": "user-123",
+  "uploadCount": 3,
+  "uploadLimitCount": 10,
+  "remainingUploadSlots": 7,
+  "storageUsedBytes": 3000000,
+  "storageLimitBytes": 1073741824,
+  "remainingBytes": 1070741824,
+  "totalConsumptions": 4,
+  "activeConsumptions": 3,
+  "releasedConsumptions": 1
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "error": "invalid_request",
+  "details": [
+    "userId is required"
+  ]
+}
+```
+
+---
 
 ### POST /quota/check
 
@@ -622,10 +440,564 @@ curl -X POST http://localhost/quota-service/quota/check \
 }
 ```
 
+---
+
+### POST /quota/consume
+
+```
+POST /quota/consume
+
+  Attempts to consume quota for a given user and file. Checks current quota
+  state, records the consumption in quota_consumptions, and increments the
+  user's upload_count and storage_used_bytes. This endpoint is idempotent by
+  (userId, fileHash): if an active (unreleased) consumption already exists for
+  that pair, the request succeeds without double-counting. Uses a Postgres
+  transaction with row locks so concurrent requests for the same user are safe
+  across replicas.
+
+  Body:
+    userId         string   required  User or account identifier
+    fileSizeBytes  integer  required  File size in bytes; must be a positive integer
+    fileHash       string   required  Hash used for idempotency and duplicate detection
+
+  Responses:
+    200  Quota consumed (or idempotent replay of an existing active consumption)
+    400  Missing or invalid request body fields
+    409  Quota exceeded — upload_count or storage_used_bytes would exceed limits
+    500  Internal error
+```
+
+**Example request:**
+
+```bash
+curl -X POST http://localhost/quota-service/quota/consume \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-123",
+    "fileSizeBytes": 1000000,
+    "fileHash": "abc123"
+  }'
+```
+
+**Example response (200 — consumed):**
+
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "consumed": true,
+  "idempotentReplay": false,
+  "reason": "consumed",
+  "userId": "user-123",
+  "uploadCount": 2,
+  "uploadLimitCount": 10,
+  "remainingUploadSlots": 8,
+  "storageUsedBytes": 2000000,
+  "storageLimitBytes": 1073741824,
+  "remainingBytes": 1071741824
+}
+```
+
+**Example response (200 — idempotent replay):**
+
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "consumed": false,
+  "idempotentReplay": true,
+  "reason": "already_consumed",
+  "userId": "user-123",
+  "uploadCount": 2,
+  "uploadLimitCount": 10,
+  "remainingUploadSlots": 8,
+  "storageUsedBytes": 2000000,
+  "storageLimitBytes": 1073741824,
+  "remainingBytes": 1071741824
+}
+```
+
+**Example response (409 — quota exceeded):**
+
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "error": "quota_exceeded",
+  "reason": "storage_limit_exceeded",
+  "userId": "user-123",
+  "requestedFileSizeBytes": 1000000,
+  "uploadCount": 9,
+  "uploadLimitCount": 10,
+  "remainingUploadSlots": 1,
+  "storageUsedBytes": 1073000000,
+  "storageLimitBytes": 1073741824,
+  "remainingBytes": 741824
+}
+```
+
+**Example response (400):**
+
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "error": "invalid_request",
+  "details": [
+    "fileHash is required and must be a non-empty string"
+  ]
+}
+```
+
+---
+
+### POST /quota/release
+
+```
+POST /quota/release
+
+  Releases a previously consumed quota entry for a given user and file,
+  decrementing the user's upload_count and storage_used_bytes. This endpoint
+  is idempotent: if no active consumption exists for the (userId, fileHash)
+  pair — either because it was never consumed or was already released — the
+  request still returns 200 with released: false. Uses a Postgres transaction
+  with row locks so concurrent requests for the same user are safe across
+  replicas. Called by upload-service when a transcode job fails and the quota
+  needs to be returned to the user.
+
+  Body:
+    userId    string  required  User or account identifier
+    fileHash  string  required  Hash identifying the upload to release
+    reason    string  optional  Human-readable release reason (defaults to "released")
+
+  Responses:
+    200  Released successfully, idempotent replay (nothing to release or already released)
+    400  Missing or invalid request body fields
+    500  Internal error
+```
+
+**Example request:**
+
+```bash
+curl -X POST http://localhost/quota-service/quota/release \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-123",
+    "fileHash": "abc123",
+    "reason": "transcode_failed"
+  }'
+```
+
+**Example response (200 — released):**
+
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "released": true,
+  "idempotentReplay": false,
+  "reason": "transcode_failed",
+  "userId": "user-123",
+  "uploadCount": 1,
+  "uploadLimitCount": 10,
+  "remainingUploadSlots": 9,
+  "storageUsedBytes": 1000000,
+  "storageLimitBytes": 1073741824,
+  "remainingBytes": 1072741824
+}
+```
+
+**Example response (200 — already released):**
+
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "released": false,
+  "idempotentReplay": true,
+  "reason": "already_released",
+  "userId": "user-123",
+  "uploadCount": 1,
+  "uploadLimitCount": 10,
+  "remainingUploadSlots": 9,
+  "storageUsedBytes": 1000000,
+  "storageLimitBytes": 1073741824,
+  "remainingBytes": 1072741824
+}
+```
+
+**Example response (200 — nothing to release):**
+
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "released": false,
+  "idempotentReplay": true,
+  "reason": "nothing_to_release",
+  "userId": "user-123",
+  "uploadCount": 0,
+  "uploadLimitCount": 10,
+  "remainingUploadSlots": 10,
+  "storageUsedBytes": 0,
+  "storageLimitBytes": 1073741824,
+  "remainingBytes": 1073741824
+}
+```
+
+**Example response (400):**
+
+```json
+{
+  "serviceInstance": "team-6-video-processing-quota-service-1",
+  "error": "invalid_request",
+  "details": [
+    "fileHash is required and must be a non-empty string"
+  ]
+}
+```
+
 `quota-service` is safe to run with three replicas because it keeps quota state
 in `quota-db`. `POST /quota/consume` and `POST /quota/release` use Postgres
 transactions and row locks, so duplicate requests for the same `userId` and
 `fileHash` are idempotent even when requests land on different replicas.
+
+## catalog-service
+
+### GET /health
+
+```
+GET /health
+
+  Returns the health status of the catalog service and its database.
+
+  Responses:
+    200  Service healthy
+    503  Database unreachable
+```
+
+**Example request:**
+
+```bash
+curl http://localhost/catalog-service/health
+```
+
+**Example response (200):**
+
+```json
+{
+  "status": "healthy",
+  "db": "ok"
+}
+```
+
+**Example response (503):**
+
+```json
+{
+  "status": "unhealthy",
+  "db": "error: connection refused"
+}
+```
+
+---
+
+### GET /videos
+
+```
+GET /videos
+
+  Returns video records with status = available ordered by newest first.
+
+  Responses:
+    200  JSON array of videos
+    500  Database query error
+```
+
+**Example request:**
+
+```bash
+curl http://localhost/catalog-service/videos
+```
+
+**Example response (200):**
+
+```json
+[
+  {
+    "id": "video-id",
+    "upload_id": "upload-id",
+    "user_id": "user-123",
+    "title": "Demo Video",
+    "original_filename": "demo.mp4",
+    "duration_seconds": 42,
+    "status": "available"
+  }
+]
+```
+> Results are cached in Redis for 60 seconds (`catalog:videos:available`). Cache is invalidated automatically when a video is marked unavailable via the `video.rejected` pub/sub event.
+
+---
+
+### GET /video/search
+ 
+```
+GET /video/search
+ 
+  Returns available videos whose original_filename matches the search query
+  using a case-insensitive substring match. Only videos with
+  moderation_status = 'available' are returned, ordered by newest first.
+ 
+  Query parameters:
+    q  string  required  Substring to search for in original_filename
+ 
+  Responses:
+    200  JSON array of matching videos (may be empty)
+    400  Missing search query
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl "http://localhost/catalog-service/video/search?q=demo"
+```
+ 
+**Example response (200):**
+ 
+```json
+[
+  {
+    "id": "video-id",
+    "file_hash": "abc123",
+    "original_filename": "demo.mp4",
+    "content_type": "video/mp4",
+    "file_size_bytes": 1000000,
+    "uploaded_by": "user-123",
+    "duration": 42,
+    "moderation_status": "available",
+    "created_at": "2026-04-20T12:00:00.000Z"
+  }
+]
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing search query"
+}
+```
+ 
+---
+ 
+### GET /video/:hash
+ 
+```
+GET /video/:hash
+ 
+  Returns a single video record by its fileHash. Only videos with
+  moderation_status = 'available' are returned. Results are cached in Redis
+  under the key video:{hash} for 60 seconds. The cache entry is invalidated
+  when the video's moderation status changes via POST /mod-result.
+ 
+  Path:
+    hash  string  required  The file hash of the video to retrieve
+ 
+  Responses:
+    200  Video record returned
+    404  No available video found with that hash
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl http://localhost/catalog-service/video/abc123
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "id": "video-id",
+  "file_hash": "abc123",
+  "original_filename": "demo.mp4",
+  "content_type": "video/mp4",
+  "file_size_bytes": 1000000,
+  "uploaded_by": "user-123",
+  "duration": 42,
+  "moderation_status": "available",
+  "created_at": "2026-04-20T12:00:00.000Z"
+}
+```
+ 
+**Example response (404):**
+ 
+```json
+{
+  "error": "video not found"
+}
+```
+ 
+---
+ 
+
+### POST /add-video
+ 
+```
+POST /add-video
+ 
+  Adds a video record to the catalog database. Called internally by the
+  transcode-worker after a video has been successfully processed. If a video
+  with the same fileHash already exists, the request is rejected.
+ 
+  Responses:
+    200  Video added to catalog successfully
+    400  Missing or invalid request body fields
+    401  Video with that fileHash already exists
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost/catalog-service/add-video \
+  -H "Content-Type: application/json" \
+  -d '{
+    "originalFilename": "demo.mp4",
+    "contentType": "video/mp4",
+    "fileSizeBytes": 1000000,
+    "uploadedBy": "user-123",
+    "fileHash": "abc123",
+    "duration": 42
+  }'
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "upload to catalog db accepted"
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing fields from request body: originalFilename, contentType, fileSizeBytes, uploadedBy, fileHash, duration"
+}
+```
+ 
+**Example response (401):**
+ 
+```json
+{
+  "error": "video already exists in catalog, cannot reupload"
+}
+```
+ 
+---
+ 
+### POST /mod-result
+ 
+```
+POST /mod-result
+ 
+  Updates the moderation status of an existing video in the catalog database.
+  Called internally by the moderation-worker after a moderation decision has
+  been made. The video must already exist in the catalog.
+ 
+  Responses:
+    200  Moderation status updated successfully
+    400  Missing or invalid request body fields
+    401  No video with that fileHash found in catalog
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost/catalog-service/mod-result \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fileHash": "abc123",
+    "status": "approved"
+  }'
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "moderation status recorded"
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing fields from request body: fileHash and status"
+}
+```
+ 
+**Example response (401):**
+ 
+```json
+{
+  "error": "no video with that file hash found in catalog"
+}
+```
+ 
+---
+ 
+### POST /thumbnail
+ 
+```
+POST /thumbnail
+ 
+  Adds or updates a thumbnail entry for an existing video in the catalog
+  database. Called internally by the thumbnail-worker. If a thumbnail already
+  exists for the same fileHash and timestampSeconds, its URL is updated.
+  The video must already exist in the catalog.
+ 
+  Responses:
+    200  Thumbnail added or updated successfully
+    400  Missing or invalid request body fields
+    401  No video with that fileHash found in catalog
+    500  Database error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost/catalog-service/thumbnail \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fileHash": "abc123",
+    "thumbnailUrl": "https://example.com/thumbnails/abc123-5.jpg",
+    "timestampSeconds": "5"
+  }'
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "thumbnail added to database"
+}
+```
+ 
+**Example response (400):**
+ 
+```json
+{
+  "error": "missing fields from request body: fileHash, thumbnailUrl, and timestampSeconds"
+}
+```
+ 
+**Example response (401):**
+ 
+```json
+{
+  "error": "no video with that file hash found in catalog"
+}
+```
 
 ## playback-service
  
@@ -773,6 +1145,67 @@ curl "http://localhost:3003/resume?userId=user-123&videoId=video-456"
 }
 ```
 
+## transcode-worker
+ 
+### GET /health
+ 
+```
+GET /health
+ 
+  Returns the health status of the transcode worker, its Redis connection,
+  current queue depths for the main transcode-jobs queue and the dead-letter
+  queue, and the timestamp of the last completed job. The worker pulls jobs
+  from the transcode-jobs Redis list, simulates transcoding proportional to
+  video duration, calls catalog-service POST /add-video, then publishes a
+  transcode-complete pub/sub event.
+ 
+  Responses:
+    200  Healthy — Redis is reachable and queue metrics were read successfully
+    503  Unhealthy — Redis is unreachable or queue metrics could not be read
+```
+ 
+**Example request:**
+ 
+```bash
+curl http://localhost:3004/health
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "status": "healthy",
+  "service": "transcode-worker",
+  "timestamp": "2026-04-27T18:21:00.000Z",
+  "uptime_seconds": 3600,
+  "redisStatus": {
+    "status": "healthy",
+    "latency_ms": 1
+  },
+  "queueDepth": 0,
+  "deadLetterQueueDepth": 0,
+  "lastJobAt": "2026-04-27T18:20:00.000Z"
+}
+```
+ 
+**Example response (503):**
+ 
+```json
+{
+  "status": "unhealthy",
+  "service": "transcode-worker",
+  "timestamp": "2026-04-27T18:21:00.000Z",
+  "uptime_seconds": 3600,
+  "redisStatus": {
+    "status": "unhealthy",
+    "error": "connect ECONNREFUSED 127.0.0.1:6379"
+  },
+  "queueDepth": 0,
+  "deadLetterQueueDepth": 0,
+  "lastJobAt": null
+}
+```
+
 ## thumbnail-worker
 
 ### GET /health
@@ -814,6 +1247,53 @@ curl http://localhost:3005/health
 }
 ```
 
+## search-index-worker
+ 
+### GET /health
+ 
+```
+GET /health
+ 
+  Returns the health status of the search index worker, its Redis and
+  PostgreSQL connections, the dead-letter queue depth, the fileHash of the
+  last successfully indexed job, the total number of jobs completed, and the
+  process uptime. The worker subscribes to the transcode-complete Redis
+  pub/sub channel and upserts records into the video_search_index table.
+  Failed messages are routed to the search-index-worker:dlq list along with
+  the original message and error details.
+ 
+  Responses:
+    200  Healthy — Redis and PostgreSQL are reachable
+    500  Unhealthy — Redis or PostgreSQL is unreachable
+```
+ 
+**Example request:**
+ 
+```bash
+curl http://localhost:3006/health
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "status": "healthy",
+  "dlq_depth": 0,
+  "last_successful_job": "abc123",
+  "jobs_completed": 5,
+  "uptime": 3600.123
+}
+```
+ 
+**Example response (500):**
+ 
+```json
+{
+  "status": "unhealthy",
+  "error": "connect ECONNREFUSED 127.0.0.1:5432"
+}
+```
+
 ## moderation-worker
 
 ### GET /health
@@ -850,6 +1330,8 @@ curl http://localhost:3007/health
   "dlqLength": 0
 }
 ```
+
+---
 
 ### GET /dlq
 
