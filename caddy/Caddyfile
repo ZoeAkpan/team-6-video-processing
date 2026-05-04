@@ -3,6 +3,7 @@
         reverse_proxy {
             dynamic a upload-service 3000
             lb_policy round_robin
+            lb_try_duration 5s
         }
     }
 
@@ -10,6 +11,7 @@
         reverse_proxy {
             dynamic a quota-service 3001
             lb_policy round_robin
+            lb_try_duration 5s
         }
     }
 
@@ -17,6 +19,7 @@
         reverse_proxy {
             dynamic a catalog-service 3002
             lb_policy round_robin
+            lb_try_duration 5s
         }
     }
 }

@@ -1,0 +1,52 @@
+// Sprint 4 - Scaling comparison
+//
+// Run from inside Holmes:
+//   BASE_URL=http://caddy:80 k6 run --env SCALE=single /workspace/k6/sprint-4-scale.js
+//   BASE_URL=http://caddy:80 k6 run --env SCALE=replicated /workspace/k6/sprint-4-scale.js
+//
+// Run from the host:
+//   BASE_URL=http://localhost:80 k6 run --env SCALE=single k6/sprint-4-scale.js
+//   BASE_URL=http://localhost:80 k6 run --env SCALE=replicated k6/sprint-4-scale.js
+
+import http from "k6/http";
+import { check, sleep } from "k6";
+import { Rate } from "k6/metrics";
+
+const BASE_URL = __ENV.BASE_URL || "http://caddy:80";
+const ENDPOINT = __ENV.ENDPOINT || "/quota-service/quota/k6-sprint-4-user";
+const SCALE = __ENV.SCALE || "unspecified";
+const errorRate = new Rate("errors");
+
+export const options = {
+  stages: [
+    { duration: "30s", target: 20 },
+    { duration: "60s", target: 50 },
+    { duration: "10s", target: 0 },
+  ],
+  summaryTrendStats: ["avg", "min", "med", "max", "p(50)", "p(95)", "p(99)"],
+  thresholds: {
+    http_req_failed: ["rate<0.01"],
+    errors: ["rate<0.01"],
+  },
+};
+
+export default function () {
+  const res = http.get(`${BASE_URL}${ENDPOINT}`, {
+    tags: { endpoint: ENDPOINT, scale: SCALE },
+  });
+
+  const ok = check(res, {
+    "status is 200": (r) => r.status === 200,
+    "body is json-like": (r) => r.body.startsWith("{") || r.body.startsWith("["),
+    "quota response includes replica id": (r) => {
+      try {
+        return Boolean(r.json("serviceInstance"));
+      } catch (_) {
+        return false;
+      }
+    },
+  });
+
+  errorRate.add(!ok);
+  sleep(0.5);
+}

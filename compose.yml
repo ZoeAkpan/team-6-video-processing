@@ -247,10 +247,7 @@ services:
   
   quota-service:
     build: ./quota-service
-    container_name: quota-service
     restart: unless-stopped
-    ports:
-      - "3001:3001"
     networks:
       - team-net
     environment:
