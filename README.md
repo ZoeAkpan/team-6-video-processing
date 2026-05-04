@@ -15,7 +15,7 @@
 |  Duyen Tran           | [`catalog-service`]                           |
 |  Zoë Akpan            | [`upload-service`, `thumbnail-worker`(can help out)]|
 |  Jihyun Kim           | [`quota-service`]                             |
-|  Nishil Adina         | [`moderation-worker`, `playback-service`]     |
+|  Nishil Adina         | [`moderation-worker`]     |
 |  Gabriella Wang       | [`search-index-worker`]                       |
 |  Jahnavi Sharma       | [`catalog-service` ]                          |
 |  Robert Winfield      | [`transcode-worker`]                          |
@@ -30,13 +30,10 @@
 
 ```bash
 # Start everything (builds images on first run)
-docker compose up --build
+docker compose up -d --build
 
 # Start with service replicas (Sprint 4)
 docker compose up -d --build --scale upload-service=3 --scale quota-service=3 --scale catalog-service=3
-
-# Start upload-service behind Caddy with three replicas
-docker compose up --build --scale upload-service=3
 
 # Verify all services are healthy
 docker compose ps
