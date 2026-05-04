@@ -35,6 +35,9 @@ docker compose up --build
 # Start with service replicas (Sprint 4)
 docker compose up -d --build --scale upload-service=3 --scale quota-service=3 --scale catalog-service=3
 
+# Start upload-service behind Caddy with three replicas
+docker compose up --build --scale upload-service=3
+
 # Verify all services are healthy
 docker compose ps
 
@@ -345,17 +348,18 @@ curl -X POST http://localhost/catalog-service/thumbnail \
 
 ### GET /health
 
-**Method and path:** `GET /health`
+```
+GET /health
 
-**Description:** Returns the health status of the upload service, PostgreSQL,
-and Redis.
+  Returns the health status of the upload service and its dependencies:
+  PostgreSQL, Redis, quota-service, and the Redis transcode queue. When the
+  service is scaled, the response includes the instanceId for the replica that
+  handled the request.
 
-**Responses:**
-
-| Status | Meaning |
-| ------ | ------- |
-| 200 | Service and dependencies healthy |
-| 503 | One or more dependencies unreachable |
+  Responses:
+    200  Healthy — service and dependencies are reachable
+    503  Service unavailable — one or more dependencies are unreachable
+```
 
 **Example request:**
 
@@ -369,12 +373,64 @@ curl http://localhost/upload-service/health
 {
   "status": "healthy",
   "service": "upload-service",
-  "timestamp": "2026-04-27T18:21:00.000Z",
+  "instanceId": "55ff7b1c5928",
+  "timestamp": "2026-05-03T22:16:43.122Z",
   "uptime_seconds": 42,
   "checks": {
     "database": { "status": "healthy", "latency_ms": 2 },
-    "redis": { "status": "healthy", "latency_ms": 1 }
+    "redis": { "status": "healthy", "latency_ms": 1 },
+    "quotaService": { "status": "healthy", "http_status": 200 },
+    "transcodeQueue": {
+      "status": "healthy",
+      "name": "transcode-jobs",
+      "depth": 0
+    }
   }
+}
+```
+
+---
+
+### GET /upload/:fileHash
+
+```
+GET /upload/:fileHash
+
+  Returns one upload record by fileHash. The lookup reads from the shared
+  upload PostgreSQL database, so it works the same way when upload-service is
+  running with multiple replicas.
+
+  Path:
+    fileHash  string  The upload file hash used as the upload primary key
+
+  Responses:
+    200  Success — returns the upload record
+    404  Not found — no upload exists with that fileHash
+    500  Internal error — database lookup failed
+```
+
+**Example request:**
+
+```bash
+curl http://localhost/upload-service/upload/a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+```
+
+**Example response (200):**
+
+```json
+{
+  "fileHash": "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+  "originalFilename": "vacation_hawaii.mp4",
+  "contentType": "video/mp4",
+  "fileSizeBytes": "1000",
+  "uploadedBy": "alice@example.com",
+  "duration": "1",
+  "status": "queued",
+  "quotaConsumed": true,
+  "errorMessage": null,
+  "transcodeEnqueuedAt": "2026-05-03T22:00:00.000Z",
+  "createdAt": "2026-05-03T22:00:00.000Z",
+  "updatedAt": "2026-05-03T22:00:00.000Z"
 }
 ```
 
@@ -382,34 +438,30 @@ curl http://localhost/upload-service/health
 
 ### POST /upload
 
-**Method and path:** `POST /upload`
+```
+POST /upload
 
-**Description:** Sends an upload request to the upload service. The endpoint is
-idempotent by `fileHash`: if the hash already exists, the existing upload is
-returned. New uploads synchronously call `quota-service` at `POST /quota/check`;
-if quota allows the upload, the service writes the upload record and pushes a
-job to the Redis `transcode-jobs` queue.
+  Accepts a new video upload request. This endpoint is idempotent by fileHash:
+  duplicate file hashes return the existing upload instead of creating another
+  record. New uploads synchronously call quota-service, write to the shared
+  upload PostgreSQL database, and enqueue a transcode job in Redis.
 
-**Request body:**
+  Body:
+    originalFilename  string   required  Original uploaded file name
+    contentType       string   required  MIME type for the file, such as video/mp4
+    fileSizeBytes     integer  required  File size in bytes; must be greater than 0
+    uploadedBy        string   required  User or account identifier for the uploader
+    fileHash          string   required  Hash used for idempotency and duplicate detection
+    duration          number   required  Video duration in seconds; must be greater than 0
 
-| Field | Type | Required | Meaning |
-| ----- | ---- | -------- | ------- |
-| `originalFilename` | string | required | Original uploaded file name |
-| `contentType` | string | required | MIME type for the file, such as `video/mp4` |
-| `fileSizeBytes` | number | required | File size in bytes; must be greater than `0` |
-| `uploadedBy` | string | required | User or account identifier for the uploader |
-| `fileHash` | string | required | Hash used for idempotency and duplicate detection |
-| `metadata` | object | optional | Extra upload metadata; defaults to `{}` |
-
-**Responses:**
-
-| Status | Meaning |
-| ------ | ------- |
-| 201 | Upload accepted and saved |
-| 200 | Matching `fileHash` already exists; existing upload returned |
-| 400 | Missing or invalid request body fields |
-| 403 | Upload blocked by quota service |
-| 500 | Internal error |
+  Responses:
+    201  Created — upload was accepted, saved, quota was consumed, and a transcode job was queued
+    200  Success — matching fileHash already exists and the existing upload is returned
+    400  Bad request — missing fields, invalid JSON, or invalid field values
+    403  Forbidden — quota-service blocked the upload or quota consumption conflicted
+    503  Service unavailable — quota-service, Redis queue, or quota rollback failed
+    500  Internal error — unexpected upload failure
+```
 
 **Example request:**
 
@@ -421,8 +473,8 @@ curl -X POST http://localhost/upload-service/upload \
     "contentType": "video/mp4",
     "fileSizeBytes": 1000000,
     "uploadedBy": "user-123",
-    "fileHash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-    "metadata": { "title": "Demo", "duration": "1" }
+    "fileHash": "readme-upload-example-001",
+    "duration": 42
   }'
 ```
 
@@ -431,21 +483,20 @@ curl -X POST http://localhost/upload-service/upload \
 ```json
 {
   "message": "Upload accepted",
+  "duplicate": false,
   "upload": {
-    "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-    "original_filename": "demo.mp4",
-    "storage_key": "uploads/1777314060000-demo.mp4",
-    "file_hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-    "content_type": "video/mp4",
-    "file_size_bytes": "1000000",
-    "uploaded_by": "user-123",
-    "status": "pending",
-    "error_message": null,
-    "metadata": { "title": "Demo", "duration": "1" },
-    "created_at": "2026-04-27T18:21:00.000Z",
-    "updated_at": "2026-04-27T18:21:00.000Z",
-    "processing_started_at": null,
-    "processing_completed_at": null
+    "fileHash": "readme-upload-example-001",
+    "originalFilename": "demo.mp4",
+    "contentType": "video/mp4",
+    "fileSizeBytes": "1000000",
+    "uploadedBy": "user-123",
+    "duration": "42",
+    "status": "queued",
+    "quotaConsumed": true,
+    "errorMessage": null,
+    "transcodeEnqueuedAt": "2026-05-03T22:20:00.000Z",
+    "createdAt": "2026-05-03T22:20:00.000Z",
+    "updatedAt": "2026-05-03T22:20:00.000Z"
   },
   "quota": {
     "allowed": true,
@@ -458,6 +509,18 @@ curl -X POST http://localhost/upload-service/upload \
     "storageUsedBytes": 0,
     "storageLimitBytes": 1073741824,
     "remainingBytes": 1073741824
+  },
+  "quotaConsumption": {
+    "consumed": true,
+    "idempotentReplay": false,
+    "reason": "consumed",
+    "userId": "user-123",
+    "uploadCount": 1,
+    "uploadLimitCount": 10,
+    "remainingUploadSlots": 9,
+    "storageUsedBytes": 1000000,
+    "storageLimitBytes": 1073741824,
+    "remainingBytes": 1072741824
   }
 }
 ```
@@ -466,23 +529,22 @@ curl -X POST http://localhost/upload-service/upload \
 
 ```json
 {
-  "message": "Upload already exists",
-  "idempotent": true,
+  "message": "An upload with this file hash already exists",
+  "duplicate": true,
+  "fileHash": "readme-upload-example-001",
   "upload": {
-    "id": "7a8c9d4f-7648-4f8f-94f0-4455347aa101",
-    "original_filename": "demo.mp4",
-    "storage_key": "uploads/1777314060000-demo.mp4",
-    "file_hash": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
-    "content_type": "video/mp4",
-    "file_size_bytes": "1000000",
-    "uploaded_by": "user-123",
-    "status": "pending",
-    "error_message": null,
-    "metadata": { "title": "Demo", "duration": "1" },
-    "created_at": "2026-04-27T18:21:00.000Z",
-    "updated_at": "2026-04-27T18:21:00.000Z",
-    "processing_started_at": null,
-    "processing_completed_at": null
+    "fileHash": "readme-upload-example-001",
+    "originalFilename": "demo.mp4",
+    "contentType": "video/mp4",
+    "fileSizeBytes": "1000000",
+    "uploadedBy": "user-123",
+    "duration": "42",
+    "status": "queued",
+    "quotaConsumed": true,
+    "errorMessage": null,
+    "transcodeEnqueuedAt": "2026-05-03T22:20:00.000Z",
+    "createdAt": "2026-05-03T22:20:00.000Z",
+    "updatedAt": "2026-05-03T22:20:00.000Z"
   }
 }
 ```
@@ -718,25 +780,21 @@ curl "http://localhost:3003/resume?userId=user-123&videoId=video-456"
 
 ### GET /health
 
-**Method and path:** `GET /health`
+```
+GET /health
 
-**Description:** Returns the health status of the thumbnail worker, PostgreSQL,
-Redis, queue depth, dead letter queue depth, and the timestamp of the last
-successfully processed thumbnail job. The worker listens for `transcode-complete`
-Redis pub/sub events, validates the event payload, enqueues valid messages onto
-`thumbnail-jobs`, writes simulated thumbnail references to the catalog database,
-clears the catalog cache, and publishes `thumbnail.complete` after successful
-processing.
+  Returns the health status of the thumbnail worker, Redis queue depth, dead
+  letter queue depth, current in-flight job, subscribed Redis channel, and the
+  timestamp of the last successfully processed thumbnail job. The worker listens
+  for transcode-complete Redis pub/sub events, validates them, queues valid
+  messages onto thumbnail-jobs, writes simulated thumbnail references through
+  catalog-service, clears the catalog cache, and publishes thumbnail.complete
+  after successful processing.
 
-Malformed messages and messages that reference a missing catalog video are
-treated as poison pills and moved to `thumbnail-dead-letter`. 
-
-**Responses:**
-
-| Status | Meaning |
-| ------ | ------- |
-| 200 | Worker and dependencies healthy |
-| 503 | PostgreSQL or Redis unhealthy |
+  Responses:
+    200  Healthy — Redis is reachable and queue metadata was read
+    503  Service unavailable — Redis is unreachable or health snapshot failed
+```
 
 **Example request:**
 
@@ -749,13 +807,12 @@ curl http://localhost:3005/health
 ```json
 {
   "status": "healthy",
-  "db": "ok",
   "redis": "ok",
   "queueDepth": 0,
-  "deadLetterQueueDepth": 3,
+  "dlq_depth": 0,
   "lastSuccessfullyProcessedJobAt": "2026-04-27T18:20:00.000Z",
   "inFlightJobId": null,
-  "subscribedChannels": ["transcode-complete"],
+  "subscribedChannels": "transcode-complete",
   "timestamp": "2026-04-27T18:21:00.000Z"
 }
 ```
