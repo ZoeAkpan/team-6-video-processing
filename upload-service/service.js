@@ -271,6 +271,54 @@ app.get('/health', async (_req, res) => {
   res.status(healthy ? 200 : 503).json(body)
 })
 
+app.post('/upload/seed', async (req, res) => {
+  const count = 100
+  const contentTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/mkv']
+  const statuses = { success: 0, duplicate: 0, failed: 0 }
+  const results = []
+
+  for (let i = 0; i < count; i++) {
+    const fileHash = `seed-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 10)}`
+    const payload = {
+      originalFilename: `seed-video-${i + 1}.mp4`,
+      contentType: contentTypes[i % contentTypes.length],
+      fileSizeBytes: Math.floor(Math.random() * 100) + 1,
+      uploadedBy: `seed-user-${(i % 10) + 1}`,
+      fileHash,
+      duration: Math.round((Math.random() * 30)) + 1,
+    }
+
+    try {
+      const response = await postJson(`http://localhost:${port}/upload`, payload)
+
+      if (response.status === 201) {
+        statuses.success++
+        results.push({ index: i + 1, fileHash, status: response.status, ok: response.ok })
+      } else if (response.status === 200) {
+        statuses.duplicate++
+        results.push({ index: i + 1, fileHash, status: response.status, ok: response.ok })
+      } else { 
+        statuses.failed++
+        log("seed_upload_failed", { error: response.payload.error, ...payload })
+        results.push({ index: i + 1, fileHash, status: response.status, ok: response.ok, error: response.payload.error })
+      }
+
+      
+    } catch (err) {
+      statuses.failed++
+      results.push({ index: i + 1, fileHash, status: null, ok: false, error: err.message })
+    }
+  }
+
+  log('seed_completed', { count, ...statuses })
+
+  return res.status(200).json({
+    message: `Seeded ${count} upload requests`,
+    summary: { total: count, ...statuses },
+    results,
+  })
+})
+
 app.get('/upload/:fileHash', async (req, res) => {
   try {
     const upload = await getUploadByHash(req.params.fileHash)
