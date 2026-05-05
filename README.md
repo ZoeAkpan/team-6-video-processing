@@ -148,6 +148,59 @@ curl http://localhost/upload-service/health
 
 ---
 
+### POST /upload/seed
+ 
+```
+POST /upload/seed
+ 
+  Generates 100 fake upload requests and sends each one to POST /upload.
+  Useful for populating the system with test data. Each request uses a unique
+  fileHash, a rotating set of content types, and one of ten seed users
+  (seed-user-1 through seed-user-10). Results are tallied by outcome and
+  returned in full. Failed requests are logged with event seed_upload_failed.
+ 
+  Responses:
+    200  Seed run completed — summary and per-request results returned
+    500  Internal error
+```
+ 
+**Example request:**
+ 
+```bash
+curl -X POST http://localhost/upload-service/upload/seed
+```
+ 
+**Example response (200):**
+ 
+```json
+{
+  "message": "Seeded 100 upload requests",
+  "summary": {
+    "total": 100,
+    "success": 88,
+    "duplicate": 0,
+    "failed": 12
+  },
+  "results": [
+    {
+      "index": 1,
+      "fileHash": "seed-1746312000000-0-a3f9bc12",
+      "status": 201,
+      "ok": true
+    },
+    {
+      "index": 2,
+      "fileHash": "seed-1746312000001-1-d7e4fa89",
+      "status": 403,
+      "ok": false,
+      "error": "Upload blocked by quota service"
+    }
+  ]
+}
+```
+
+---
+
 ### GET /upload/:fileHash
 
 ```
