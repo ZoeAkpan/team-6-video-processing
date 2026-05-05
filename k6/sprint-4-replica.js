@@ -4,7 +4,7 @@
 //   BASE_URL=http://caddy:80 k6 run /workspace/k6/sprint-4-replica.js
 //
 // During the sustained stage, stop one replica:
-//   docker stop $(docker compose ps -q quota-service | head -1)
+//   docker stop team-6-video-processing-catalog-service-1
 //
 // Restart it before the test ends:
 //   docker compose up -d --scale upload-service=3 --scale quota-service=3 --scale catalog-service=3
