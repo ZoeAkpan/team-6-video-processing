@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS video_search_index (
     uploaded_by TEXT,
     status VARCHAR(20),
     duration NUMERIC(10, 2),
+    views INTEGER DEFAULT 0,
     updated_at TIMESTAMPTZ DEFAULT NOW(),
     indexed_at TIMESTAMPTZ DEFAULT NOW()
 );
