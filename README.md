@@ -194,7 +194,8 @@ curl -X POST http://localhost/upload-service/upload/seed
       "status": 403,
       "ok": false,
       "error": "Upload blocked by quota service"
-    }
+    },
+    ...
   ]
 }
 ```
