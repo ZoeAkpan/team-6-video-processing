@@ -68,8 +68,7 @@ app.get('/health', async (req, res) => {
 async function processJob(job) {
 
     // Sleep proportional to video duration
-    const duration = parseInt(job.duration, 10);
-    const processingTimeSeconds = duration * VIDEO_PROCESSING_RATE
+    const processingTimeSeconds = job.duration * VIDEO_PROCESSING_RATE
     console.log(`job ${job.fileHash} processing for ${processingTimeSeconds}s`);
     await new Promise((resolve) => setTimeout(resolve, processingTimeSeconds * 1000));
     console.log(`job ${job.fileHash} processing complete`);
@@ -83,11 +82,13 @@ async function processJob(job) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(job),
+        signal: AbortSignal.timeout(5000),
     });
-
-    const catalogBody = await catalogRes.json().catch(() => null);
-    console.log("catalog db response:", catalogRes.status, JSON.stringify(catalogBody));
     
+    if (!catalogRes.ok) {
+        const body = await catalogRes.json().catch(() => null);
+        throw new Error(`catalog service returned ${catalogRes.status}: ${JSON.stringify(body)}`);
+    }
     // publish transcode-complete event
     await client.publish('transcode-complete', JSON.stringify({
         fileHash: job.fileHash,
@@ -124,7 +125,7 @@ async function loop() {
 
         if (!job || !job.fileHash) {
             console.error('Invalid or missing fileHash in payload, adding to DLQ', parsed);
-            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
+            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); 
             continue;
         }
 
@@ -136,14 +137,14 @@ async function loop() {
             !job.fileHash 
         ) {
             console.error('Invalid transcode job payload: missing required fields', job);
-            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
+            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); 
             continue;
         }
 
         const duration = Number(job.duration)
         if (!Number.isFinite(duration) || duration <= 0) {
             console.error(`Invalid duration: ${job.duration}`, job);
-            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); // Push to dead-letter queue
+            await client.lPush(DEAD_LETTER_QUEUE_NAME, raw); 
             continue;
         }
 
@@ -151,6 +152,7 @@ async function loop() {
             await processJob(job);
         } catch (err) {
             console.error(`job ${job.fileHash} processing failed with error ${err.message}`);
+            await queueClient.lPush(DEAD_LETTER_QUEUE_NAME, raw);
         }
     }
 }
