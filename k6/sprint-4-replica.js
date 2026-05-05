@@ -7,7 +7,7 @@
 //   docker stop team-6-video-processing-catalog-service-1
 //
 // Restart it before the test ends:
-//   docker compose up -d --scale upload-service=3 --scale quota-service=3 --scale catalog-service=3
+//   docker start team-6-video-processing-catalog-service-1
 
 import http from "k6/http";
 import { check, sleep } from "k6";
