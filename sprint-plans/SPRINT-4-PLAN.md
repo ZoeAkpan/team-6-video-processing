@@ -65,7 +65,7 @@ Caddy will handle load balancing between the replicas. We are planning to clean 
 
 ### [Robert Winfield]
 
-- [ ] Add Caddy load balancing for transcode-worker
+- [ ] ~~Add Caddy load balancing for transcode-worker~~
 - [ ] Update README.md to describe scaling capabilities
 - [ ] Strengthen testing for transcode module
 

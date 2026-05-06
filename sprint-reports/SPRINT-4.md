@@ -22,7 +22,7 @@ Upload, catalog, and quota service were the three services that we replicated. L
 | Anne-Colombe Sinkpon | Added Docker Compose scaling support for upload-service behind Caddy. Removed the fixed upload-service container name and host port binding so multiple upload-service replicas can run at the same time. Added an instanceId in health responses, response headers, and request logs so we can confirm different replicas are handling traffic. Refreshed endpoint documentation for upload-service and thumbnail-worker.| `e84cb30`, `aac912c`, `2ae66a2`, `2496adf` |
 | Gabriella Wang | Added error handling for payload to avoid JSON parsing errors, added error handling for shutdown to make failures clearer, update flowchart  | `50635a0`|
 | Zoë Akpan | Got rid of unnecessary comments, added shutdown, and just cleaned up code overall for upload-service, transcode-worker, and search-index-worker. Added timeout to declarations. Added SIGINT/SIGTERM shutdown for search-index-worker. Pushed failed jobs to the DLQ for transcode-worker. Removed any redundancy.| 50c44e9 | 
-| Robert Winfield | | |
+| Robert Winfield | Helped draft solutions for transcode worker and catalog service interaction, improved API documntation for transcode-worker health endpoint. | Approve PRs 51, 62 |
 ---
 
 ## Starting the System with Replicas
