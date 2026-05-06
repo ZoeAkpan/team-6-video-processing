@@ -7,12 +7,13 @@ const app = express()
 const PORT = Number(process.env.PORT || 3006)
 const REDIS_URL = process.env.REDIS_URL || 'redis://localhost:6379'
 const CHANNEL = process.env.TRANSCODE_COMPLETE_CHANNEL || 'transcode-complete'
-const redis = createClient({ url: REDIS_URL })
-const subscriber = createClient({ url: REDIS_URL })
+const redis = createClient({url: REDIS_URL})
+const subscriber = createClient({url: REDIS_URL})
 const DLQ_NAME = "search-index-worker:dlq"
 const LAST_SUCCESSFUL_JOB = "search-index-worker:last_successful_job"
 const JOB_COUNT = "search-index-worker:jobs_completed"
 
+let shuttingDown = false
 
 redis.on('error', (err) => console.error('Redis error:', err.message))
 subscriber.on('error', (err) => console.error('Redis subscriber error:', err.message))
@@ -51,8 +52,8 @@ async function handleIndexing(payload) {
     updatedAt 
   } = payload
 
-  if (!fileHash) {
-    throw new Error('Poison Pill: Payload is missing fileHash')
+  if (!fileHash || !updatedAt) {
+    throw new Error('Poison Pill: Missing required fields')
   }
   
   const query = `
@@ -101,7 +102,13 @@ async function startWorker() {
     await subscriber.subscribe(CHANNEL, async (message) => {
     console.log(`Receiving message from '${CHANNEL}':`, message)
       try {
-        const payload = JSON.parse(message)
+        let payload
+        try {
+          payload = JSON.parse(message)
+        } catch (err) {
+          throw new Error(`Invalid JSON: ${err.message}`)
+        }
+
         await handleIndexing(payload)
         await redis.set(LAST_SUCCESSFUL_JOB, payload.fileHash)
         await redis.incr(JOB_COUNT)
@@ -130,12 +137,24 @@ async function startWorker() {
 }
 
 async function shutdown(signal) {
-    console.log(`Shutting down (${signal})`)
+  if (shuttingDown) return
+  shuttingDown = true
+
+  console.log(`Shutting down (${signal})`)
+
+  try {
     await subscriber.unsubscribe()
+    await new Promise((resolve) => setTimeout(resolve, 500))
     await subscriber.quit()
     await redis.quit()
     await pool.end()
+
+    console.log(JSON.stringify({ event: 'shutdown_complete' }))
     process.exit(0)
+  } catch (err) {
+    console.log(`Shutting down error (${err.message})`)
+    process.exit(1)
+  }
 }
 
 process.on('SIGINT', () => shutdown('SIGINT'))

@@ -1,5 +1,6 @@
 // Sprint 4 - Scaling comparison
-//
+
+// Brief instructions:
 // Run from inside Holmes:
 //   BASE_URL=http://caddy:80 k6 run --env SCALE=single /workspace/k6/sprint-4-scale.js
 //   BASE_URL=http://caddy:80 k6 run --env SCALE=replicated /workspace/k6/sprint-4-scale.js
@@ -8,6 +9,16 @@
 //   BASE_URL=http://localhost:80 k6 run --env SCALE=single k6/sprint-4-scale.js
 //   BASE_URL=http://localhost:80 k6 run --env SCALE=replicated k6/sprint-4-scale.js
 
+// Detailed instructions:
+// 1. Ensure k6 is downloaded on your machine (brew install k6)
+// 2. Make sure all services are running: `docker compose up -d`
+// 3. Apply the quota-service DB schema if you haven't already (docker compose exec -T quota-db psql -U quota -d quota < quota-service/db/schema.sql)
+// 4. Check to see if quota service is even running: `curl http://localhost:80/quota-service/quota/k6-sprint-4-user` (should return 200 with a JSON body)
+// 5. Now, run the k6 tests with commands:
+  // BASE_URL=http://caddy:80 k6 run --env SCALE=single /workspace/k6/sprint-4-scale.js
+  // BASE_URL=http://caddy:80 k6 run --env SCALE=replicated /workspace/k6/sprint-4-scale.js
+
+  
 import http from "k6/http";
 import { check, sleep } from "k6";
 import { Rate } from "k6/metrics";
