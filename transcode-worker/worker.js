@@ -5,7 +5,7 @@ const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
 const QUEUE_NAME = 'transcode-jobs';
 const DEAD_LETTER_QUEUE_NAME = 'transcode-dead-letter';
 const PORT = Number(process.env.PORT || 3004);
-const VIDEO_PROCESSING_RATE = 1; // seconds of processing time per second of video duration
+const VIDEO_PROCESSING_RATE = 0.1; // seconds of processing time per second of video duration
 const CATALOG_DB_UPLOAD_ENDPOINT = "http://catalog-service:3002/add-video";
 
 const app = express();
