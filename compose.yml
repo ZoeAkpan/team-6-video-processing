@@ -113,6 +113,7 @@ services:
 
   caddy:
     image: caddy:2-alpine
+    container_name: caddy
     ports:
       - '80:80'
     volumes:
