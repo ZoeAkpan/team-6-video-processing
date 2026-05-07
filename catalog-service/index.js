@@ -116,7 +116,7 @@ app.post("/add-video", async (req, res) => {
   console.log(`file hash is ${fileHash}`)
 
   // make sure this fileHash is not already in the catalog db (should never have to worry about this)
-  const rows = await pool.query(
+  const { rows } = await pool.query(
     `SELECT 1 FROM video WHERE file_hash = $1`,
     [fileHash]
   )
@@ -174,7 +174,7 @@ app.post("/mod-result", async (req, res) => {
   console.log(`file hash is ${fileHash}`)
 
   // make sure this fileHash IS already in the catalog db (should never have to worry about this)
-  const rows = await pool.query(
+  const { rows } = await pool.query(
     `SELECT 1 FROM video WHERE file_hash = $1`,
     [fileHash]
   )
@@ -224,7 +224,7 @@ app.post("/thumbnail", async (req, res) => {
   console.log(`file hash is ${fileHash}`)
 
   // make sure this fileHash IS already in the catalog db (should never have to worry about this)
-  const rows = await pool.query(
+  const { rows } = await pool.query(
     `SELECT 1 FROM video WHERE file_hash = $1`,
     [fileHash]
   )
