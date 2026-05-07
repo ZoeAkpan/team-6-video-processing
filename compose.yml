@@ -111,6 +111,20 @@ services:
   #     timeout: 3s
   #     retries: 5
 
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    ports:
+      - '80:80'
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile
+    depends_on:
+      - upload-service
+      - quota-service
+      - catalog-service
+    networks:
+      - team-net
+
   moderation-db:
     image: postgres:16
     container_name: moderation-db
@@ -234,10 +248,7 @@ services:
   
   quota-service:
     build: ./quota-service
-    container_name: quota-service
     restart: unless-stopped
-    ports:
-      - "3001:3001"
     networks:
       - team-net
     environment:
@@ -330,10 +341,9 @@ services:
 
   upload-service:
     build: ./upload-service
-    container_name: upload-service
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     networks:
       - team-net
     environment:
@@ -378,10 +388,7 @@ services:
 
   catalog-service:
     build: ./catalog-service
-    container_name: catalog-service
     restart: unless-stopped
-    ports:
-      - "3002:3002"
     networks:
       - team-net
     environment:

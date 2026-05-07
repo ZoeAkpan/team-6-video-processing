@@ -17,6 +17,8 @@ const DEFAULT_UPLOAD_LIMIT_COUNT = Number(
 const DEFAULT_STORAGE_LIMIT_BYTES = Number(
   process.env.DEFAULT_STORAGE_LIMIT_BYTES || 1073741824
 )
+const SERVICE_INSTANCE =
+  process.env.INSTANCE_ID || process.env.HOSTNAME || 'quota-service-local'
 
 const pool = new Pool({
   connectionString: DATABASE_URL,
@@ -30,6 +32,8 @@ redis.on('error', (err) => {
   console.error(
     JSON.stringify({
       event: 'redis_error',
+      service: 'quota-service',
+      serviceInstance: SERVICE_INSTANCE,
       message: err.message,
       timestamp: new Date().toISOString(),
     })
@@ -40,6 +44,8 @@ pool.on('error', (err) => {
   console.error(
     JSON.stringify({
       event: 'db_pool_error',
+      service: 'quota-service',
+      serviceInstance: SERVICE_INSTANCE,
       message: err.message,
       timestamp: new Date().toISOString(),
     })
@@ -50,6 +56,8 @@ function log(event, fields = {}) {
   console.log(
     JSON.stringify({
       event,
+      service: 'quota-service',
+      serviceInstance: SERVICE_INSTANCE,
       ...fields,
       timestamp: new Date().toISOString(),
     })
@@ -60,12 +68,21 @@ function logError(event, err, fields = {}) {
   console.error(
     JSON.stringify({
       event,
+      service: 'quota-service',
+      serviceInstance: SERVICE_INSTANCE,
       message: err.message,
       stack: err.stack,
       ...fields,
       timestamp: new Date().toISOString(),
     })
   )
+}
+
+function withServiceInstance(payload) {
+  return {
+    serviceInstance: SERVICE_INSTANCE,
+    ...payload,
+  }
 }
 
 function validateQuotaCheckBody(body) {
@@ -233,6 +250,7 @@ app.get('/health', async (_req, res) => {
   return res.status(healthy ? 200 : 503).json({
     status: healthy ? 'healthy' : 'unhealthy',
     service: 'quota-service',
+    serviceInstance: SERVICE_INSTANCE,
     db,
     redis: redisStatus,
   })
@@ -242,10 +260,10 @@ app.get('/quota/:userId', async (req, res) => {
   const { userId } = req.params
 
   if (!userId || !userId.trim()) {
-    return res.status(400).json({
+    return res.status(400).json(withServiceInstance({
       error: 'invalid_request',
       details: ['userId is required'],
-    })
+    }))
   }
 
   try {
@@ -266,17 +284,17 @@ app.get('/quota/:userId', async (req, res) => {
 
     const counts = consumptionCounts.rows[0]
 
-    return res.status(200).json({
+    return res.status(200).json(withServiceInstance({
       ...serializeQuota(quota),
       totalConsumptions: Number(counts.total_consumptions),
       activeConsumptions: Number(counts.active_consumptions),
       releasedConsumptions: Number(counts.released_consumptions),
-    })
+    }))
   } catch (err) {
     logError('quota_get_error', err, { userId })
-    return res.status(500).json({
+    return res.status(500).json(withServiceInstance({
       error: 'internal_server_error',
-    })
+    }))
   }
 })
 
@@ -291,10 +309,10 @@ app.post('/quota/check', async (req, res) => {
         requestBody: req.body,
       })
 
-      return res.status(400).json({
+      return res.status(400).json(withServiceInstance({
         error: 'invalid_request',
         details: errors,
-      })
+      }))
     }
 
     const { userId, fileSizeBytes, fileHash } = req.body
@@ -313,17 +331,17 @@ app.post('/quota/check', async (req, res) => {
       ...decision.state,
     })
 
-    return res.status(200).json({
+    return res.status(200).json(withServiceInstance({
       allowed: decision.allowed,
       reason: decision.reason,
       requestedFileSizeBytes: fileSizeBytes,
       ...decision.state,
-    })
+    }))
   } catch (err) {
     logError('quota_check_error', err)
-    return res.status(500).json({
+    return res.status(500).json(withServiceInstance({
       error: 'internal_server_error',
-    })
+    }))
   }
 })
 
@@ -340,10 +358,10 @@ app.post('/quota/consume', async (req, res) => {
         requestBody: req.body,
       })
 
-      return res.status(400).json({
+      return res.status(400).json(withServiceInstance({
         error: 'invalid_request',
         details: errors,
-      })
+      }))
     }
 
     const { userId, fileSizeBytes, fileHash } = req.body
@@ -384,12 +402,12 @@ app.post('/quota/consume', async (req, res) => {
         ...serializeQuota(quotaRow),
       })
 
-      return res.status(200).json({
+      return res.status(200).json(withServiceInstance({
         consumed: false,
         idempotentReplay: true,
         reason: 'already_consumed',
         ...serializeQuota(quotaRow),
-      })
+      }))
     }
 
     const decision = buildQuotaDecision(quotaRow, fileSizeBytes)
@@ -405,12 +423,12 @@ app.post('/quota/consume', async (req, res) => {
         ...decision.state,
       })
 
-      return res.status(409).json({
+      return res.status(409).json(withServiceInstance({
         error: 'quota_exceeded',
         reason: decision.reason,
         requestedFileSizeBytes: fileSizeBytes,
         ...decision.state,
-      })
+      }))
     }
 
     if (existingConsumption && existingConsumption.released_at !== null) {
@@ -459,18 +477,18 @@ app.post('/quota/consume', async (req, res) => {
       ...serializeQuota(updatedQuota),
     })
 
-    return res.status(200).json({
+    return res.status(200).json(withServiceInstance({
       consumed: true,
       idempotentReplay: false,
       reason: 'consumed',
       ...serializeQuota(updatedQuota),
-    })
+    }))
   } catch (err) {
     await rollbackQuietly(client)
     logError('quota_consume_error', err)
-    return res.status(500).json({
+    return res.status(500).json(withServiceInstance({
       error: 'internal_server_error',
-    })
+    }))
   } finally {
     client.release()
   }
@@ -489,10 +507,10 @@ app.post('/quota/release', async (req, res) => {
         requestBody: req.body,
       })
 
-      return res.status(400).json({
+      return res.status(400).json(withServiceInstance({
         error: 'invalid_request',
         details: errors,
-      })
+      }))
     }
 
     const { userId, fileHash } = req.body
@@ -532,12 +550,12 @@ app.post('/quota/release', async (req, res) => {
         ...serializeQuota(quotaRow),
       })
 
-      return res.status(200).json({
+      return res.status(200).json(withServiceInstance({
         released: false,
         idempotentReplay: true,
         reason: 'nothing_to_release',
         ...serializeQuota(quotaRow),
-      })
+      }))
     }
 
     if (existingConsumption.released_at !== null) {
@@ -553,12 +571,12 @@ app.post('/quota/release', async (req, res) => {
         ...serializeQuota(quotaRow),
       })
 
-      return res.status(200).json({
+      return res.status(200).json(withServiceInstance({
         released: false,
         idempotentReplay: true,
         reason: 'already_released',
         ...serializeQuota(quotaRow),
-      })
+      }))
     }
 
     await client.query(
@@ -595,18 +613,18 @@ app.post('/quota/release', async (req, res) => {
       ...serializeQuota(updatedQuota),
     })
 
-    return res.status(200).json({
+    return res.status(200).json(withServiceInstance({
       released: true,
       idempotentReplay: false,
       reason,
       ...serializeQuota(updatedQuota),
-    })
+    }))
   } catch (err) {
     await rollbackQuietly(client)
     logError('quota_release_error', err)
-    return res.status(500).json({
+    return res.status(500).json(withServiceInstance({
       error: 'internal_server_error',
-    })
+    }))
   } finally {
     client.release()
   }
@@ -614,16 +632,16 @@ app.post('/quota/release', async (req, res) => {
 
 app.use((err, _req, res, _next) => {
   if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
-    return res.status(400).json({
+    return res.status(400).json(withServiceInstance({
       error: 'invalid_json',
-    })
+    }))
   }
 
   logError('unhandled_error', err)
 
-  return res.status(500).json({
+  return res.status(500).json(withServiceInstance({
     error: 'internal_server_error',
-  })
+  }))
 })
 
 async function start() {

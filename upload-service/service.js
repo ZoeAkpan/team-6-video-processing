@@ -10,8 +10,20 @@ const pool = new pg.Pool({ connectionString: process.env.DATABASE_URL })
 const redis = createClient({ url: process.env.REDIS_URL })
 
 const startTime = Date.now()
+const instanceId = process.env.INSTANCE_ID ?? process.env.HOSTNAME ?? 'unknown'
 
 app.use(express.json())
+app.use((req, res, next) => {
+  res.set('X-Service-Instance', instanceId)
+  res.on('finish', () => {
+    log('request_handled', {
+      method: req.method,
+      path: req.originalUrl,
+      statusCode: res.statusCode,
+    })
+  })
+  next()
+})
 
 pool.on('error', (err) => {
   console.error(
@@ -37,6 +49,7 @@ function log(event, fields = {}) {
   console.log(
     JSON.stringify({
       event,
+      instanceId,
       ...fields,
       timestamp: new Date().toISOString(),
     })
@@ -47,6 +60,7 @@ function logError(event, err, fields = {}) {
   console.error(
     JSON.stringify({
       event,
+      instanceId,
       message: err.message,
       stack: err.stack,
       ...fields,
@@ -68,6 +82,7 @@ async function postJson(url, body) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(5000),
   })
 
   const payload = await safeJson(response)
@@ -247,12 +262,61 @@ app.get('/health', async (_req, res) => {
   const body = {
     status: healthy ? 'healthy' : 'unhealthy',
     service: process.env.SERVICE_NAME ?? 'upload-service',
+    instanceId,
     timestamp: new Date().toISOString(),
     uptime_seconds: Math.floor((Date.now() - startTime) / 1000),
     checks,
   }
 
   res.status(healthy ? 200 : 503).json(body)
+})
+
+app.post('/upload/seed', async (req, res) => {
+  const count = 100
+  const contentTypes = ['video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/mkv']
+  const statuses = { success: 0, duplicate: 0, failed: 0 }
+  const results = []
+
+  for (let i = 0; i < count; i++) {
+    const fileHash = `seed-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 10)}`
+    const payload = {
+      originalFilename: `seed-video-${i + 1}.mp4`,
+      contentType: contentTypes[i % contentTypes.length],
+      fileSizeBytes: Math.floor(Math.random() * 100) + 1,
+      uploadedBy: `seed-user-${(i % 10) + 1}`,
+      fileHash,
+      duration: Math.round((Math.random() * 30)) + 1,
+    }
+
+    try {
+      const response = await postJson(`http://localhost:${port}/upload`, payload)
+
+      if (response.status === 201) {
+        statuses.success++
+        results.push({ index: i + 1, fileHash, status: response.status, ok: response.ok })
+      } else if (response.status === 200) {
+        statuses.duplicate++
+        results.push({ index: i + 1, fileHash, status: response.status, ok: response.ok })
+      } else { 
+        statuses.failed++
+        log("seed_upload_failed", { error: response.payload.error, ...payload })
+        results.push({ index: i + 1, fileHash, status: response.status, ok: response.ok, error: response.payload.error })
+      }
+
+      
+    } catch (err) {
+      statuses.failed++
+      results.push({ index: i + 1, fileHash, status: null, ok: false, error: err.message })
+    }
+  }
+
+  log('seed_completed', { count, ...statuses })
+
+  return res.status(200).json({
+    message: `Seeded ${count} upload requests`,
+    summary: { total: count, ...statuses },
+    results,
+  })
 })
 
 app.get('/upload/:fileHash', async (req, res) => {
@@ -474,8 +538,8 @@ app.post('/upload', async (req, res) => {
   } catch (err) {
     logError('upload_error', err, { fileHash, uploadedBy })
 
-    return res.status(err.status ?? 500).json({
-      error: err.message ?? 'Upload failed',
+    return res.status(500).json({
+      error: 'Upload failed',
     })
   }
 })
